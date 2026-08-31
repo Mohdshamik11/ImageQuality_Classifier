@@ -122,11 +122,27 @@ over Claude's speed.
   h 3→12 (noise), unsharp mask amount 0→0.8 (blur). HONEST LIMIT the user accepts: exposure and
   contrast come out genuinely fixed; **noise and blur are only nudged** — classical methods can't
   invent detail.
-- **Phase 2b (learned restoration) — SCOPED AND DEFERRED.** A small U-Net trained on the existing
-  synthetic `degraded → clean` pairs is the next rung and would beat classical noise/blur repair
-  while still running on CPU. Deliberately not built: weeks of work comparable to the classifier,
-  still short of commercial "AI enhance" without realistic degradation modelling + a GPU, and the
-  project has met its resume goal. Do NOT start it unless the user explicitly asks.
+- **Phase 2b roadmap (learned restoration) — SCOPED AND DEFERRED; documented in `docs/writeup.html`
+  section 11.** Do NOT start any of it unless the user explicitly asks. The classifier stays as-is
+  (it already says WHAT to fix); only the fix mechanism changes. Staged by effort:
+  - **Stage 1 (recommended entry point):** a small U-Net (encoder/decoder + skips, ~1–3M params)
+    or a DnCNN-style residual net, trained on the `raw_X_<defect>.png` ↔ `raw_X_clean.png` pairs
+    (and combo pairs) that `generate_synthetic.py` already produces — train-split pairs to train,
+    val/test pairs to measure. Flag-driven still applies: one net gated on "any flag," or one
+    small net per defect gated by its flag (keeps "only touch what's broken"). Loss: L1 to start,
+    optionally + SSIM or a light VGG-perceptual term; NOT GAN at this stage. Metrics: PSNR + SSIM
+    vs the clean target (replace macro-F1 as headline), on val/test + combo pairs separately.
+    Runs on CPU ~1–2 s/tiled image, so the current tiling + Streamlit stack is unchanged. Beats
+    classical clearly; not commercial-grade.
+  - **Stage 2 (needs a GPU):** replace the fixed Gaussian synthetics with a randomised degradation
+    pipeline (Real-ESRGAN style — random blur kernels incl. motion, mixed noise models, JPEG
+    re-compression, resize, random order/strength) + a larger/varied dataset (DIV2K / GoPro /
+    SIDD). This is what closes the "real photos differ from clean Gaussians" gap.
+  - **Stage 3:** bigger from-scratch arch (Restormer / NAFNet) with the Stage-2 pipeline
+    (months, GPU); OR load pretrained NAFNet/Restormer/SCUNet weights and run inference only
+    (fastest to professional, but 50–300 MB models, GPU host, abandons the from-scratch premise).
+  - **Hard limits no method fixes:** blown-out clipped highlights (data gone at capture);
+    perfect deblur (ill-posed).
 - **Streamlit app (`app.py`, repo root = the Community Cloud main file; built 2026-09-01):**
   multi-upload capped at `MAX_IMAGES = 15` (free-tier RAM; ingest downscales to long side 1400),
   classify-only-new-files with a progress bar, `st.session_state` keyed by `file_id`, 4-per-row
@@ -190,15 +206,20 @@ have been resolved (per-class thresholds → shipped at 0.5; augmentation → th
 crop; combos in training → 525 added in iteration 4; UI upload resolution → tiled at short-side
 320; UI image cap → `MAX_IMAGES = 15`). See the "Project facts" above for each.
 
-**Remaining work is deployment, not design:**
+**DEPLOYED (2026-09-01).** Live at `imagequalityclassifier.streamlit.app` (Streamlit Community
+Cloud, public repo `github.com/Mohdshamik11/ImageQuality_Classifier`, branch `main`, main file
+`app.py`, Python 3.11). Deploy prep committed in `eb863c3`: `.gitignore` gained
+`!models/traincombo_best.pt`; `requirements.txt` trimmed to app-only with
+`--extra-index-url https://download.pytorch.org/whl/cpu` (CPU torch) + `opencv-python-headless`;
+`requirements-dev.txt` added for the full pipeline/notebook deps; `SETUP.md` step 6 now points at
+`requirements-dev.txt`. Build resolved `torch==2.13.0+cpu`, `opencv-python-headless` — both
+pre-empted gotchas landed clean. Redeploys automatically on push to `main`. If it OOMs on the
+free tier during multi-image enhance, drop `MAX_IMAGES` to 8 and `INGEST_LONG_SIDE` to 1000 in
+`app.py` and push.
 
-- Push the repo to GitHub. Check `models/traincombo_best.pt` (~35 MB) is committed and not caught
-  by `.gitignore`.
-- Connect to Streamlit Community Cloud with `app.py` as the main file. Re-check current free-tier
-  limits (RAM, sleep policy) before deploying.
-
-Do NOT reopen the classifier or start phase 2b unless the user explicitly asks. If the user wants
-to iterate further, the mentor collaboration rules below still apply.
+The project is **complete**. Do NOT reopen the classifier or start phase 2b (roadmap above)
+unless the user explicitly asks. If the user wants to iterate, the mentor collaboration rules
+below still apply.
 
 ## Multi-label data schema
 

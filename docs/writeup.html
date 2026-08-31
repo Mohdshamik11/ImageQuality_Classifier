@@ -294,7 +294,8 @@
       <li><a href="#app"><span class="n">07</span><span>The application</span></a></li>
       <li><a href="#ledger"><span class="n">08</span><span>Decision ledger</span></a></li>
       <li><a href="#repro"><span class="n">09</span><span>Reproducibility</span></a></li>
-      <li><a href="#limits"><span class="n">10</span><span>Limitations &amp; next steps</span></a></li>
+      <li><a href="#limits"><span class="n">10</span><span>Limitations</span></a></li>
+      <li><a href="#roadmap"><span class="n">11</span><span>Toward reliable enhancement</span></a></li>
     </ol>
   </nav>
 
@@ -310,7 +311,7 @@
       <p>The goal was to learn how a machine-learning project actually works by building one end to end: a from-scratch CNN that multi-label-classifies images for quality defects, with a future image-enhancement phase in mind. No transfer learning &mdash; the point was the fundamentals.</p>
       <p>There is no public dataset of photos labelled &ldquo;blurry&rdquo; or &ldquo;underexposed,&rdquo; so the dataset was <strong>synthesised</strong>: 750 clean photos from COCO were each degraded five ways with controlled image maths, giving 4,500 single-defect images plus a matched clean copy of every scene. The split, the labels, and a small set of deliberately <em>multi-defect</em> test images were all designed to keep the evaluation honest.</p>
       <p>The first model scored a respectable <strong>macro-F1 0.85</strong> on single-defect images but collapsed on stacked defects (<strong>0.53</strong>), and one class &mdash; noise &mdash; lagged the rest badly. Each of the next three iterations targeted one diagnosed problem. The final model was measured once on the held-out <strong>test set</strong>: <strong>macro-F1 0.911</strong> on single-defect images (validation had predicted 0.909 &mdash; the two agree, which is the sign the iterations were principled and not fitted to the validation set) and <strong>0.883</strong> on the multi-defect probe. Noise is recovered and the overfitting gap is essentially closed.</p>
-      <p>The model is wrapped in a Streamlit app: upload photos, each is classified by <strong>tiling</strong> a 256-pixel window across the whole frame, and an &ldquo;Enhance&rdquo; button runs a <strong>classical, flag-driven</strong> repair on the ones with defects. The learned-restoration version was scoped and deliberately left as future work (section&nbsp;10).</p>
+      <p>The model is wrapped in a Streamlit app (<code>imagequalityclassifier.streamlit.app</code>): upload photos, each is classified by <strong>tiling</strong> a 256-pixel window across the whole frame, and an &ldquo;Enhance&rdquo; button runs a <strong>classical, flag-driven</strong> repair on the ones with defects. Classical repair of noise and blur is limited by design; <a href="#roadmap">section&nbsp;11</a> is the staged plan to make it reliable.</p>
     </div>
 
     <p class="eyebrow" style="margin-bottom:12px">Held-out test set &nbsp;/&nbsp; model frozen, threshold 0.5, measured once</p>
@@ -728,7 +729,7 @@
 
     <div class="note warn">
       <span class="tag">Honest limit</span>
-      Exposure and contrast come out genuinely fixed. <strong>Noise and blur are only nudged</strong> &mdash; classical methods can't invent detail. Unsharp mask re-weights the edge energy that survived; it can't restore frequencies the blur destroyed. Non-local means removes grain but softens texture with it. Professional-grade repair needs a <em>learned</em> restoration model (section&nbsp;10).
+      Exposure and contrast come out genuinely fixed. <strong>Noise and blur are only nudged</strong> &mdash; classical methods can't invent detail. Unsharp mask re-weights the edge energy that survived; it can't restore frequencies the blur destroyed. Non-local means removes grain but softens texture with it. Professional-grade repair needs a <em>learned</em> restoration model &mdash; <a href="#roadmap">section&nbsp;11</a>.
     </div>
   </section>
 
@@ -833,8 +834,8 @@
   <section id="limits">
     <div class="sechead">
       <span class="num">10</span>
-      <h2>Limitations &amp; next steps</h2>
-      <p class="sub">What this project is not, and the deliberate stopping point.</p>
+      <h2>Limitations</h2>
+      <p class="sub">What this project is not.</p>
     </div>
 
     <h3>The classifier</h3>
@@ -847,16 +848,65 @@
 
     <h3>The enhancement</h3>
     <div class="prose">
-      <p>Phase 2a is classical, and classical repair of noise and blur has a hard ceiling &mdash; it cannot invent detail. The next rung is <strong>phase 2b: a small restoration U-Net</strong> trained on the same synthetic <em>(degraded &rarr; clean)</em> pairs the classifier used. It would be clearly better than unsharp mask and still run on a CPU, and the narrative &mdash; one synthetic pipeline, a classifier and a restoration net both built from it &mdash; is strong.</p>
-      <p>It was <strong>scoped and deliberately deferred</strong>: it is a weeks-long effort comparable to the classification work, it still would not reach commercial &ldquo;AI enhance&rdquo; quality without realistic degradation modelling and a GPU, and this project had already met its goal as a resume build. Bigger architectures (Restormer, NAFNet) or pretrained state-of-the-art weights would get closer, but need a GPU host and, in the pretrained case, abandon the from-scratch premise.</p>
+      <p>Phase 2a is classical, and classical repair of noise and blur has a hard ceiling: it cannot invent detail. Exposure and contrast come out genuinely fixed; noise and blur are only nudged. The concrete plan for reliable repair is <a href="#roadmap">section&nbsp;11</a>.</p>
     </div>
     <div class="prose">
-      <p>Deployment target: Streamlit Community Cloud (free, CPU, ~1&nbsp;GB RAM) &mdash; the 15-image cap and CPU-friendly model sizes are chosen for it.</p>
+      <p>Deployment: Streamlit Community Cloud (free, CPU, ~1&nbsp;GB RAM) at <code>imagequalityclassifier.streamlit.app</code>. The 15-image cap and CPU-friendly model sizes are chosen for it.</p>
+    </div>
+  </section>
+
+  <!-- ============ 11 ROADMAP ============ -->
+  <section id="roadmap">
+    <div class="sechead">
+      <span class="num">11</span>
+      <h2>Toward reliable enhancement</h2>
+      <p class="sub">Phase 2a was deliberately the classical baseline. This is the staged plan to make the &ldquo;Enhance&rdquo; button actually reliable, in order of effort.</p>
+    </div>
+
+    <div class="prose">
+      <p>The classifier stays as-is throughout &mdash; it already tells the enhancer <em>what</em> to fix. What changes is <em>how</em> the fix is done: from hand-written image maths to a trained model with a learned prior over what clean photos look like.</p>
+    </div>
+
+    <h3>Stage 1 &mdash; a small restoration network (the immediate next step)</h3>
+    <ul class="list">
+      <li><strong>Data already exists.</strong> Every <code>raw_X_&lt;defect&gt;.png</code> has a matching <code>raw_X_clean.png</code>, and the same for the combo images &mdash; that is a full set of <em>(degraded &rarr; clean)</em> training pairs, produced by the same <code>generate_synthetic.py</code>. Use the train-split pairs to train, the val/test pairs to measure.</li>
+      <li><strong>Architecture:</strong> a small U-Net (encoder / decoder with skip connections), ~1&ndash;3M parameters, or a DnCNN-style residual net that predicts the noise/blur residual rather than the clean image. Either runs on CPU in ~1&ndash;2&nbsp;s per tiled image, so the current tiling + Streamlit setup is unchanged.</li>
+      <li><strong>Flag-driven still applies:</strong> either one network that repairs whatever it sees, gated on &ldquo;any flag set,&rdquo; or one small network per defect, each gated by its own flag. The per-defect option keeps the &ldquo;only touch what is broken&rdquo; guarantee.</li>
+      <li><strong>Loss:</strong> L1 pixel loss to start; optionally add an SSIM term or a light VGG-feature (perceptual) term for sharper texture. Skip adversarial (GAN) loss at this stage &mdash; it is much harder to train stably.</li>
+      <li><strong>Metrics:</strong> PSNR and SSIM against the clean target (these replace macro-F1 as the headline), reported on val/test pairs and on the combo pairs separately &mdash; the same held-out discipline as the classifier.</li>
+      <li><strong>Expected result:</strong> clearly better than unsharp mask and non-local means &mdash; recovers plausible texture instead of over-smoothing &mdash; but not commercial &ldquo;AI enhance&rdquo; quality.</li>
+    </ul>
+
+    <h3>Stage 2 &mdash; realistic degradation modelling (what makes it work on real photos)</h3>
+    <div class="prose">
+      <p>Stage 1 trained on clean single Gaussians will still under-perform on real uploads, because real degradation is messier: blur is motion + defocus + lens, noise is Poisson-Gaussian + demosaicing + JPEG compression, and they stack in random order and strength.</p>
+    </div>
+    <ul class="list">
+      <li>Replace the fixed synthetic transforms with a <strong>randomised degradation pipeline</strong> (the approach Real-ESRGAN uses): random blur kernels including motion, mixed noise models, JPEG re-compression, resize &mdash; applied in random order at random strength.</li>
+      <li>Train on a <strong>larger, more varied set</strong> &mdash; thousands of images, or established restoration datasets (DIV2K for general, GoPro for motion deblur, SIDD for real denoise).</li>
+      <li>This needs a <strong>GPU</strong> for training runs of days, not the few-minute runs the classifier needed.</li>
+    </ul>
+
+    <h3>Stage 3 &mdash; bigger architecture, or pretrained weights</h3>
+    <ul class="list">
+      <li><strong>Bigger from-scratch:</strong> a modern restoration architecture &mdash; Restormer (transformer-based) or NAFNet &mdash; trained with the Stage&nbsp;2 pipeline. Near-professional, GPU-bound, months of work.</li>
+      <li><strong>Pretrained, no training:</strong> load published NAFNet / Restormer / SCUNet weights and run inference only. Fastest path to genuinely professional output &mdash; but the models are 50&ndash;300&nbsp;MB, need a GPU host, and dropping in someone else's trained network abandons the from-scratch premise of this project.</li>
+    </ul>
+
+    <h3>The hard limits &mdash; no method fixes these</h3>
+    <ul class="list">
+      <li><strong>Blown-out highlights.</strong> Pixels clipped to pure white lost their detail at capture. Unrecoverable by anything.</li>
+      <li><strong>Perfect deblur.</strong> Deblurring is ill-posed &mdash; many different sharp images produce the same blurry one &mdash; so even Stage&nbsp;3 output is a plausible reconstruction, not the true original.</li>
+    </ul>
+
+    <div class="note">
+      <span class="tag">Recommended entry point</span>
+      <strong>Stage 1.</strong> It reuses the existing synthetic pipeline and its data, stays CPU-deployable on the same free tier, is an honest incremental improvement over phase 2a, and keeps the project's story intact: one synthetic pipeline, a classifier and a restoration network both built from it.
     </div>
   </section>
 
   <div class="foot">
-    Photo Quality Classifier &mdash; build log. Headline figures are held-out test-set results at threshold 0.5; per-iteration figures and charts are validation. Model frozen at <code>models/traincombo_best.pt</code>, epoch 14.
+    Photo Quality Classifier &mdash; build log. Headline figures are held-out test-set results at threshold 0.5; per-iteration figures and charts are validation. Model frozen at <code>models/traincombo_best.pt</code>, epoch 14. Live at <code>imagequalityclassifier.streamlit.app</code>.
   </div>
 
 </div>
