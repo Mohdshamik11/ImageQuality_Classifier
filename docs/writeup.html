@@ -277,7 +277,8 @@
       <span>Task&nbsp; <b>multi-label classification</b></span>
       <span>Data&nbsp; <b>750 photos &rarr; 5,125 labelled examples</b></span>
       <span>Model&nbsp; <b>4-stage CNN, 8.8M params</b></span>
-      <span>Result&nbsp; <b>macro-F1 0.85 &rarr; 0.91</b></span>
+      <span>Result&nbsp; <b>test macro-F1 0.91</b></span>
+      <span>App&nbsp; <b>Streamlit: classify &amp; enhance</b></span>
     </div>
   </header>
 
@@ -290,9 +291,10 @@
       <li><a href="#metrics"><span class="n">04</span><span>How the model is judged</span></a></li>
       <li><a href="#iterations"><span class="n">05</span><span>Four iterations</span></a></li>
       <li><a href="#results"><span class="n">06</span><span>Final results</span></a></li>
-      <li><a href="#ledger"><span class="n">07</span><span>Decision ledger</span></a></li>
-      <li><a href="#repro"><span class="n">08</span><span>Reproducibility</span></a></li>
-      <li><a href="#limits"><span class="n">09</span><span>Limitations &amp; next steps</span></a></li>
+      <li><a href="#app"><span class="n">07</span><span>The application</span></a></li>
+      <li><a href="#ledger"><span class="n">08</span><span>Decision ledger</span></a></li>
+      <li><a href="#repro"><span class="n">09</span><span>Reproducibility</span></a></li>
+      <li><a href="#limits"><span class="n">10</span><span>Limitations &amp; next steps</span></a></li>
     </ol>
   </nav>
 
@@ -308,6 +310,7 @@
       <p>The goal was to learn how a machine-learning project actually works by building one end to end: a from-scratch CNN that multi-label-classifies images for quality defects, with a future image-enhancement phase in mind. No transfer learning &mdash; the point was the fundamentals.</p>
       <p>There is no public dataset of photos labelled &ldquo;blurry&rdquo; or &ldquo;underexposed,&rdquo; so the dataset was <strong>synthesised</strong>: 750 clean photos from COCO were each degraded five ways with controlled image maths, giving 4,500 single-defect images plus a matched clean copy of every scene. The split, the labels, and a small set of deliberately <em>multi-defect</em> test images were all designed to keep the evaluation honest.</p>
       <p>The first model scored a respectable <strong>macro-F1 0.85</strong> on single-defect images but collapsed on stacked defects (<strong>0.53</strong>), and one class &mdash; noise &mdash; lagged the rest badly. Each of the next three iterations targeted one diagnosed problem. The final model was measured once on the held-out <strong>test set</strong>: <strong>macro-F1 0.911</strong> on single-defect images (validation had predicted 0.909 &mdash; the two agree, which is the sign the iterations were principled and not fitted to the validation set) and <strong>0.883</strong> on the multi-defect probe. Noise is recovered and the overfitting gap is essentially closed.</p>
+      <p>The model is wrapped in a Streamlit app: upload photos, each is classified by <strong>tiling</strong> a 256-pixel window across the whole frame, and an &ldquo;Enhance&rdquo; button runs a <strong>classical, flag-driven</strong> repair on the ones with defects. The learned-restoration version was scoped and deliberately left as future work (section&nbsp;10).</p>
     </div>
 
     <p class="eyebrow" style="margin-bottom:12px">Held-out test set &nbsp;/&nbsp; model frozen, threshold 0.5, measured once</p>
@@ -678,10 +681,61 @@
     </div>
   </section>
 
-  <!-- ============ 07 LEDGER ============ -->
-  <section id="ledger">
+  <!-- ============ 07 THE APPLICATION ============ -->
+  <section id="app">
     <div class="sechead">
       <span class="num">07</span>
+      <h2>The application</h2>
+      <p class="sub">A Streamlit app around the frozen model: classify uploaded photos, then repair the flagged defects.</p>
+    </div>
+
+    <h3>Scanning the whole frame &mdash; tiling</h3>
+    <div class="prose">
+      <p>The model was trained on 256&times;256 crops of images with <em>globally uniform</em> defects. A real upload breaks both assumptions: it can be 12&nbsp;megapixels, and its blur may be local &mdash; a sharp subject on a soft background. Feeding it a single centre crop would mean the model only ever sees the middle of the photo.</p>
+      <p>Instead, inference <strong>tiles</strong>: resize the upload's short side to 320&nbsp;px (close to the training scale &mdash; a larger resize would zoom the tiles in and shift how blur and grain look), slide a 256&times;256 window across it with ~60% overlap, score every tile, then combine. A typical photo yields 4&ndash;10 tiles; hard-capped at 16. No retraining &mdash; the crop-augmentation from iteration&nbsp;2 is exactly what makes the model expect 256-pixel patches.</p>
+    </div>
+    <div class="prose">
+      <p>The tiles are combined <strong>per defect, along the taxonomy</strong>:</p>
+    </div>
+    <ul class="list">
+      <li><strong>blur</strong> is local &rarr; take the <strong>maximum</strong> tile probability: &ldquo;is there blur anywhere in the frame?&rdquo;</li>
+      <li><strong>underexposed, overexposed, noise, contrast</strong> are global &rarr; take the <strong>mean</strong>: a global property shows up in every tile, and one odd tile should not flip the call.</li>
+    </ul>
+
+    <h3>The interface</h3>
+    <div class="prose">
+      <p>Upload up to 15 photos (a RAM cap for a free CPU host; larger uploads are downscaled on ingest). Each is classified once, on arrival, and shown as a card with a <code>2 flagged</code> / <code>clean</code> summary; the five per-class probabilities stay hidden behind a compact expander until the card is opened. An &ldquo;Enhance&rdquo; button then repairs every photo with at least one flag and shows the before/after with a download.</p>
+    </div>
+
+    <h3>Enhancement &mdash; classical and flag-driven (phase 2a)</h3>
+    <div class="prose">
+      <p>The enhancer reads the classifier's five flags and applies only the corresponding fix &mdash; the classification is what steers the repair. Every fix is <strong>blind auto-correction</strong> (real uploads weren't degraded by our scripts, so there is no known factor to undo), its <strong>strength scales with the classifier's confidence</strong> (a detection right at 0.5 barely touches the image; a 0.95 gets the full moderate fix), and the tonal fixes work on the <strong>lightness channel only</strong> so colours don't shift.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Order matters: contrast stretch and sharpening both amplify noise, so denoise sits between them and sharpen runs last.</caption>
+        <thead><tr><th>Flag</th><th>Fix</th><th>Technique</th></tr></thead>
+        <tbody>
+          <tr><th>underexposed</th><td>brighten</td><td>gamma correction, gamma 1.0&rarr;0.6</td></tr>
+          <tr><th>overexposed</th><td>tone down</td><td>gamma 1.0&rarr;1.5 (pixels clipped to white are unrecoverable)</td></tr>
+          <tr><th>contrast</th><td>expand tonal range</td><td>1st&ndash;99th percentile histogram stretch, blended by strength</td></tr>
+          <tr><th>noise</th><td>denoise</td><td>non-local means (<code>cv2.fastNlMeansDenoisingColored</code>)</td></tr>
+          <tr><th>blur</th><td>re-crisp edges</td><td>unsharp mask, amount 0&rarr;0.8</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note warn">
+      <span class="tag">Honest limit</span>
+      Exposure and contrast come out genuinely fixed. <strong>Noise and blur are only nudged</strong> &mdash; classical methods can't invent detail. Unsharp mask re-weights the edge energy that survived; it can't restore frequencies the blur destroyed. Non-local means removes grain but softens texture with it. Professional-grade repair needs a <em>learned</em> restoration model (section&nbsp;10).
+    </div>
+  </section>
+
+  <!-- ============ 08 LEDGER ============ -->
+  <section id="ledger">
+    <div class="sechead">
+      <span class="num">08</span>
       <h2>Decision ledger</h2>
       <p class="sub">Every non-obvious choice, why it was made, and what it moved.</p>
     </div>
@@ -735,15 +789,25 @@
             <td>tuning is now a wash; avoids a &ldquo;fitted on validation&rdquo; caveat</td>
             <td>macro-F1 0.909 single / 0.905 multi-defect</td>
           </tr>
+          <tr>
+            <th>Tiled inference in the app</th>
+            <td>real uploads are large and can have local blur; a single crop sees only the centre</td>
+            <td>whole-frame coverage, no retraining; max-pool for blur, mean for global defects</td>
+          </tr>
+          <tr>
+            <th>Classical, flag-driven enhancement (phase 2a)</th>
+            <td>classification is only useful if the fix consumes it; a learned restoration net is a project in itself</td>
+            <td>a working end-to-end &ldquo;Enhance&rdquo; button; exposure/contrast fixed, noise/blur only improved</td>
+          </tr>
         </tbody>
       </table>
     </div>
   </section>
 
-  <!-- ============ 08 REPRO ============ -->
+  <!-- ============ 09 REPRO ============ -->
   <section id="repro">
     <div class="sechead">
-      <span class="num">08</span>
+      <span class="num">09</span>
       <h2>Reproducibility</h2>
       <p class="sub">Everything is seeded (42) and scripted.</p>
     </div>
@@ -760,27 +824,34 @@
     <div class="prose">
       <p>Reusable modules: <code>src/dataset.py</code> (the <code>Dataset</code> and loaders; <code>augment=True</code> switches on the crop pipeline), <code>src/model.py</code> (<code>BaselineCNN</code>), <code>src/metrics.py</code> (per-class metrics, PR-AUC, <code>tune_thresholds</code>).</p>
       <p>Each iteration is a notebook &mdash; <code>01_baseline</code>, <code>02_crop</code>, <code>03_threshold_tuning</code>, <code>04_train_combos</code> &mdash; that writes its checkpoint and per-epoch history to <code>models/</code>. Earlier notebooks are left frozen as the reference for each stage.</p>
-      <p>Environment: conda (<code>imageQuality_Classifier</code>), PyTorch on a single RTX&nbsp;3050. A full training run is a few minutes.</p>
+      <p>The app: <code>src/predict.py</code> (tiled inference &rarr; per-defect probabilities), <code>src/enhance.py</code> (the five classical fixes + a flag-driven orchestrator), <code>app.py</code> (Streamlit, main file for deployment). The frozen model is <code>models/traincombo_best.pt</code>.</p>
+      <p>Environment: conda (<code>imageQuality_Classifier</code>), PyTorch on a single RTX&nbsp;3050. A full training run is a few minutes; app inference runs on CPU.</p>
     </div>
   </section>
 
-  <!-- ============ 09 LIMITS ============ -->
+  <!-- ============ 10 LIMITS ============ -->
   <section id="limits">
     <div class="sechead">
-      <span class="num">09</span>
+      <span class="num">10</span>
       <h2>Limitations &amp; next steps</h2>
-      <p class="sub">What this model is not, and where it goes.</p>
+      <p class="sub">What this project is not, and the deliberate stopping point.</p>
     </div>
 
+    <h3>The classifier</h3>
     <ul class="list">
       <li><strong>The multi-defect probe is no longer a pure generalisation test.</strong> Once combos entered training, the val/test combos measure &ldquo;does combo training transfer to unseen scenes,&rdquo; not &ldquo;does single-defect training generalise for free.&rdquo; Both are valid; the claim changed.</li>
-      <li><strong>Noise is still the weakest single-defect class</strong> (test F1 0.843) and <strong>overexposed the weakest on stacked defects</strong> (test F1 0.824, recall 0.70). Either is a candidate for a fifth iteration if one is warranted.</li>
-      <li><strong>Defects are globally uniform.</strong> The synthetic degradations affect the whole frame evenly. Real photos have localised blur (a sharp subject on a soft background) and localised blown highlights &mdash; the model has never seen those, and the Streamlit upload path will need to account for it (evaluate several crops, or centre-crop).</li>
-      <li><strong>The multi-defect probe is small</strong> (50 images per split). The ~0.02 validation-to-test drop on multi-defect macro-F1 is within its sampling noise; a larger probe would tighten that estimate.</li>
-      <li><strong>Iteration 4 is confounded</strong> (combos + epochs). A clean 15-epoch re-run of iteration 3 would disentangle them; it was skipped on time grounds since the direction is unambiguous.</li>
+      <li><strong>Noise is still the weakest single-defect class</strong> (test F1 0.843) and <strong>overexposed the weakest on stacked defects</strong> (test F1 0.824, recall 0.70).</li>
+      <li><strong>Synthetic defects are globally uniform and Gaussian.</strong> Real photos have localised blur and blown highlights, and real noise and blur (motion, defocus, demosaicing, compression) differ from the clean Gaussian synthetics. Tiling handles the &ldquo;local&rdquo; part; the &ldquo;different kind of degradation&rdquo; part means the model generalises to real photos only partway.</li>
+      <li><strong>Iteration 4 is confounded</strong> (combos + epochs). A clean 15-epoch re-run of iteration 3 would disentangle them; skipped on time grounds since the direction is unambiguous.</li>
     </ul>
+
+    <h3>The enhancement</h3>
     <div class="prose">
-      <p>Next: build the Streamlit upload interface around the frozen model, then the phase-2 restoration model that repairs each detected defect using the same transform functions in reverse.</p>
+      <p>Phase 2a is classical, and classical repair of noise and blur has a hard ceiling &mdash; it cannot invent detail. The next rung is <strong>phase 2b: a small restoration U-Net</strong> trained on the same synthetic <em>(degraded &rarr; clean)</em> pairs the classifier used. It would be clearly better than unsharp mask and still run on a CPU, and the narrative &mdash; one synthetic pipeline, a classifier and a restoration net both built from it &mdash; is strong.</p>
+      <p>It was <strong>scoped and deliberately deferred</strong>: it is a weeks-long effort comparable to the classification work, it still would not reach commercial &ldquo;AI enhance&rdquo; quality without realistic degradation modelling and a GPU, and this project had already met its goal as a resume build. Bigger architectures (Restormer, NAFNet) or pretrained state-of-the-art weights would get closer, but need a GPU host and, in the pretrained case, abandon the from-scratch premise.</p>
+    </div>
+    <div class="prose">
+      <p>Deployment target: Streamlit Community Cloud (free, CPU, ~1&nbsp;GB RAM) &mdash; the 15-image cap and CPU-friendly model sizes are chosen for it.</p>
     </div>
   </section>
 

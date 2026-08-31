@@ -52,10 +52,12 @@ Press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac) → type "Python: Select Interpreter
 With the environment active, run:
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements-dev.txt
 ```
 
-This installs PyTorch, OpenCV (for generating synthetic defects), Streamlit (for the UI), and everything else you need.
+This installs PyTorch, OpenCV (for generating synthetic defects), Streamlit (for the UI), pandas / scikit-learn / matplotlib (data pipeline + notebooks), and everything else you need.
+
+(`requirements.txt` is the trimmed, app-only list that Streamlit Community Cloud installs when the app is deployed. `requirements-dev.txt` includes it plus the pipeline and notebook tools.)
 
 ## 7. Verify it worked
 

@@ -95,11 +95,48 @@ over Claude's speed.
   RGB). Transform = `Resize((256,256))` + `ToTensor()`. Train loader shuffled; val/test loaders
   unshuffled so predictions align row-for-row with `loader.dataset.df` (needed to slice combos).
   `num_workers=0` (Windows spawns workers, slow from notebooks). `pin_memory` when CUDA.
-- **UI:** Streamlit app where a user uploads an image and gets defect predictions back.
-- **Forward compatibility:** the project has a planned phase 2 (image enhancement/restoration
-  per detected defect). Whenever making architecture or pipeline decisions now, consider whether
-  the choice would make it harder to bolt on an enhancement stage later — flag it if so, but
-  don't build phase 2 features now.
+- **Final model (FROZEN, 2026-08-31):** iteration 4 = crop pipeline (`augment=True`) + 525
+  training combos + 15 epochs. `models/traincombo_best.pt`, threshold **0.5** for all classes.
+  Held-out TEST: macro-F1 **0.911** single-defect / **0.883** multi-defect; per-class F1 (single):
+  blur 0.92, underexposed 0.93, overexposed 0.89, noise 0.84 (weakest), contrast 0.98. Validation
+  predicted 0.909 — matches test, so the iterations were principled, not val-overfit. Iteration
+  arc: baseline (macro-F1 0.85, noise 0.70, noise-combo 0.07) → crop for grain preservation
+  (noise PR-AUC 0.79→0.83) → threshold-tuning diagnostic (proved the crop's signal gain was real
+  — baseline noise F1 could not be tuned at all) → +525 training combos (multi-defect macro-F1
+  0.53→0.90, overfit gap 3.2×→1.1×). Full detail: [[baseline-model-spec]], `docs/writeup.html`.
+- **App inference — tiled (built 2026-08-31, `src/predict.py`):** training crops were
+  short-side-256 with NO scale augmentation, and real uploads can have LOCAL blur, so
+  `predict(PIL) -> {probs, flags, n_tiles, per_tile}` resizes the upload's short side to **320**
+  (not larger — a bigger resize zooms the tiles vs training and shifts how blur/grain look),
+  slides a 256 window with stride 96 (~60% overlap, cap 16 tiles), scores all tiles, and
+  aggregates **per defect: MAX across tiles for blur (local), MEAN for the other four (global)**.
+  No retraining. Model loaded once via `@lru_cache`, CPU, `weights_only=True`.
+- **Phase 2a enhancement (built 2026-09-01, `src/enhance.py`) — classical, flag-driven.** User's
+  decision: the fix consumes the classifier's flags (no point classifying otherwise); it is NOT a
+  blind restoration net. `enhance(PIL, flags, probs) -> (PIL, applied_list)` runs only the flagged
+  fixes, in order `underexposed → overexposed → contrast → noise → blur` (denoise before sharpen;
+  sharpen amplifies noise). Each fix's strength = `clip((prob - 0.5) / 0.5, 0, 1)` — a detection
+  right at 0.5 barely touches the image, a 0.95 gets the full moderate fix. Tonal fixes run on the
+  LAB **L channel only** (no colour shift). Techniques: gamma 1.0→0.6 (underexposed), gamma
+  1.0→1.5 (overexposed), 1st/99th percentile stretch (contrast), `cv2.fastNlMeansDenoisingColored`
+  h 3→12 (noise), unsharp mask amount 0→0.8 (blur). HONEST LIMIT the user accepts: exposure and
+  contrast come out genuinely fixed; **noise and blur are only nudged** — classical methods can't
+  invent detail.
+- **Phase 2b (learned restoration) — SCOPED AND DEFERRED.** A small U-Net trained on the existing
+  synthetic `degraded → clean` pairs is the next rung and would beat classical noise/blur repair
+  while still running on CPU. Deliberately not built: weeks of work comparable to the classifier,
+  still short of commercial "AI enhance" without realistic degradation modelling + a GPU, and the
+  project has met its resume goal. Do NOT start it unless the user explicitly asks.
+- **Streamlit app (`app.py`, repo root = the Community Cloud main file; built 2026-09-01):**
+  multi-upload capped at `MAX_IMAGES = 15` (free-tier RAM; ingest downscales to long side 1400),
+  classify-only-new-files with a progress bar, `st.session_state` keyed by `file_id`, 4-per-row
+  card grid (`st.container(border=True)` + `st.image(width="stretch")` + `st.expander(type="compact")`
+  hiding the 5 per-class `st.progress` bars until opened), "Enhance flagged photos" primary button
+  → before/after `st.columns(2)` + per-image `st.download_button`. Streamlit **1.62.0**; native
+  elements only, no CSS, sentence casing, Material icons. `requirements.txt` already has every dep.
+- **UI (BUILT):** see the Streamlit-app fact above. `app.py` is the deployment entry point.
+- **Phase 2 status:** 2a done, 2b deferred (both above). When touching the data pipeline, still
+  keep the degradation functions reusable — they are what a future restoration net would train on.
 - **Timeline:** resume-focused, originally scoped at 1-2 weeks. Scope creep is a known risk the
   user has explicitly asked to be protected against — call it out if a tangent threatens the
   timeline.
@@ -146,26 +183,22 @@ over Claude's speed.
    precision/recall, whatever is relevant — rather than waiting to be asked. The user has
    explicitly asked for visibility into what needs tuning, not just final numbers.
 
-## Open decision points — work these out WITH the user, don't pre-answer
+## Project status (2026-09-01)
 
-These are questions the user has raised but explicitly wants to reason through rather than be
-told the answer to. Do not resolve them unilaterally in code or in explanations — treat each as
-a live discussion to have when the project reaches that stage:
+The classifier and phase 2a are **complete and frozen**. All the earlier open decision points
+have been resolved (per-class thresholds → shipped at 0.5; augmentation → the grain-preserving
+crop; combos in training → 525 added in iteration 4; UI upload resolution → tiled at short-side
+320; UI image cap → `MAX_IMAGES = 15`). See the "Project facts" above for each.
 
-- **Per-class decision thresholds** — after the baseline runs, use the validation PR curves to
-  decide whether any class wants a threshold other than 0.5. Discuss, don't auto-pick.
-- **Training-time augmentation** — deferred from the data stage. Revisit after seeing the
-  baseline's train-vs-val gap; the diagnostics decide whether it's needed and which augmentations.
-- **Whether to add combo images to the *training* set** — only if the baseline's combo-subset
-  metrics show single-defect training doesn't generalize. Evidence first, then decide together.
-- **What resolution to standardize *uploaded* images to in the UI** — training is fixed at
-  256×256, so the model needs 256×256 input, but the UI's downscaling/latency tradeoff for
-  large user uploads is still an open discussion.
-- **Whether/how to cap the number of images the UI processes at once.**
+**Remaining work is deployment, not design:**
 
-Already resolved (see "Project facts" above, do NOT reopen without the user asking): number of
-conv layers (4), baseline architecture, multi-label metrics, train/val/test split ratios &
-methodology, logging approach for the baseline, code structure.
+- Push the repo to GitHub. Check `models/traincombo_best.pt` (~35 MB) is committed and not caught
+  by `.gitignore`.
+- Connect to Streamlit Community Cloud with `app.py` as the main file. Re-check current free-tier
+  limits (RAM, sleep policy) before deploying.
+
+Do NOT reopen the classifier or start phase 2b unless the user explicitly asks. If the user wants
+to iterate further, the mentor collaboration rules below still apply.
 
 ## Multi-label data schema
 
