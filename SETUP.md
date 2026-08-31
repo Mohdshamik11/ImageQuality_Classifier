@@ -16,33 +16,40 @@ That's all you need. No other extensions are required for this project.
 
 Open this `photo-quality-classifier/` folder in VS Code: `File > Open Folder...`
 
-## 3. Create a virtual environment
+## 3. Install Miniconda (if you don't have conda already)
+
+Download from https://docs.conda.io/en/latest/miniconda.html, pick the installer for your OS, and accept the defaults during install. Restart your terminal afterward.
+
+Verify it worked:
+```bash
+conda --version
+```
+
+## 4. Create and activate the conda environment
 
 Open a terminal in VS Code (`` Ctrl+` ``) and run:
 
-**Windows:**
 ```bash
-python -m venv venv
-venv\Scripts\activate
+conda create -n photo-quality-classifier python=3.11
+conda activate photo-quality-classifier
 ```
 
-**Mac/Linux:**
+You'll know it worked if you see `(photo-quality-classifier)` at the start of your terminal prompt.
+
+**Important:** every time you open a new terminal in VS Code for this project, re-run `conda activate photo-quality-classifier`.
+
+**If you have an NVIDIA GPU** and want CUDA support, install PyTorch through conda first, before the pip install below:
 ```bash
-python3 -m venv venv
-source venv/bin/activate
+conda install pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia
 ```
 
-You'll know it worked if you see `(venv)` at the start of your terminal prompt.
+## 5. Select the conda environment as your Python interpreter
 
-**Important:** every time you open a new terminal in VS Code for this project, re-activate the venv with the same command above. VS Code sometimes auto-detects and activates it for you — check for `(venv)` in the prompt to confirm.
+Press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac) → type "Python: Select Interpreter" → choose the one labeled `photo-quality-classifier (conda)`. This makes sure both your terminal and any notebooks use the same environment.
 
-## 4. Select the venv as your Python interpreter
+## 6. Install dependencies
 
-Press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac) → type "Python: Select Interpreter" → choose the one that shows `./venv/...` in its path. This makes sure both your terminal and any notebooks use the same environment.
-
-## 5. Install dependencies
-
-With the venv active, run:
+With the environment active, run:
 
 ```bash
 pip install -r requirements.txt
@@ -50,7 +57,7 @@ pip install -r requirements.txt
 
 This installs PyTorch, OpenCV (for generating synthetic defects), Streamlit (for the UI), and everything else you need.
 
-## 6. Verify it worked
+## 7. Verify it worked
 
 Run this quick check in your terminal:
 
@@ -60,7 +67,7 @@ python -c "import torch; import cv2; import streamlit; print('All good, torch ve
 
 If that prints without errors, you're ready to go.
 
-## 7. GPU check (optional)
+## 8. GPU check (optional)
 
 If you have an NVIDIA GPU and want to use it for faster training:
 
@@ -68,7 +75,7 @@ If you have an NVIDIA GPU and want to use it for faster training:
 python -c "import torch; print('GPU available:', torch.cuda.is_available())"
 ```
 
-If this prints `False` and you do have an NVIDIA GPU, you likely need the CUDA-enabled build of PyTorch instead — see https://pytorch.org/get-started/locally/ for the correct install command for your system. If you don't have a GPU, that's fine — this project trains a small CNN, which runs on CPU without issue, just a bit slower per epoch.
+If this prints `False` and you do have an NVIDIA GPU, revisit step 4 — you likely need to (re)install the CUDA-enabled PyTorch build via conda before installing the rest of `requirements.txt`. If you don't have a GPU, that's fine — this project trains a small CNN, which runs on CPU without issue, just a bit slower per epoch.
 
 ---
 

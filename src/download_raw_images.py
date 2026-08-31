@@ -21,27 +21,70 @@ from tqdm import tqdm
 COCO_VAL2017_URL = "http://images.cocodataset.org/zips/val2017.zip"
 
 
-def download_file(url: str, dest_path: Path):
+def download_file(url: str, dest_path: Path, min_expected_bytes: int = 500_000_000,
+                   max_retries: int = 5):
+    """Downloads with resume support: if a previous attempt left a partial
+    file, this continues from where it left off using an HTTP Range request
+    instead of starting over. Retries automatically on connection drops,
+    which are common on slow/unstable connections for a file this large."""
     if dest_path.exists():
-        print(f"{dest_path.name} already downloaded, skipping.")
-        return
+        actual_size = dest_path.stat().st_size
+        if actual_size >= min_expected_bytes:
+            print(f"{dest_path.name} already downloaded ({actual_size / 1e6:.0f} MB), skipping.")
+            return
 
-    print(f"Downloading {url} ...")
-    response = requests.get(url, stream=True)
-    response.raise_for_status()
-    total_size = int(response.headers.get("content-length", 0))
+    for attempt in range(1, max_retries + 1):
+        resume_pos = dest_path.stat().st_size if dest_path.exists() else 0
+        headers = {"Range": f"bytes={resume_pos}-"} if resume_pos > 0 else {}
 
-    with open(dest_path, "wb") as f, tqdm(
-        total=total_size, unit="B", unit_scale=True, desc=dest_path.name
-    ) as pbar:
-        for chunk in response.iter_content(chunk_size=8192):
-            f.write(chunk)
-            pbar.update(len(chunk))
+        try:
+            response = requests.get(url, stream=True, headers=headers, timeout=30)
+            response.raise_for_status()
+
+            # Total size: for a resumed (206 Partial Content) request, add
+            # what we already have to what's left to download.
+            total_size = int(response.headers.get("content-length", 0)) + resume_pos
+            mode = "ab" if resume_pos > 0 else "wb"
+
+            if resume_pos > 0:
+                print(f"Resuming download from {resume_pos / 1e6:.0f} MB "
+                      f"(attempt {attempt}/{max_retries}) ...")
+            else:
+                print(f"Downloading {url} (attempt {attempt}/{max_retries}) ...")
+
+            with open(dest_path, mode) as f, tqdm(
+                total=total_size, initial=resume_pos, unit="B", unit_scale=True,
+                desc=dest_path.name
+            ) as pbar:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+
+            final_size = dest_path.stat().st_size
+            if final_size >= min_expected_bytes:
+                return  # success
+            else:
+                print(f"Download ended early ({final_size / 1e6:.1f} MB) — will retry.")
+
+        except (requests.exceptions.RequestException, ConnectionError) as e:
+            print(f"Download interrupted on attempt {attempt}/{max_retries}: {e}")
+            if attempt == max_retries:
+                raise RuntimeError(
+                    f"Failed to download after {max_retries} attempts. "
+                    "Consider downloading manually in a browser instead (see notes below)."
+                )
+            print("Retrying, resuming from where it left off ...")
 
 
-def extract_zip(zip_path: Path, extract_to: Path):
-    if extract_to.exists() and any(extract_to.iterdir()):
-        print(f"{extract_to} already extracted, skipping.")
+def extract_zip(zip_path: Path, extract_to: Path, expected_subfolder: str = "val2017"):
+    """Extracts the zip into extract_to. Checks specifically for the expected
+    image subfolder (not just any file in extract_to) to decide whether
+    extraction already happened — extract_to also holds the zip file itself,
+    so a naive 'is this folder non-empty' check would always skip extraction."""
+    expected_dir = extract_to / expected_subfolder
+
+    if expected_dir.exists() and any(expected_dir.glob("*.jpg")):
+        print(f"{expected_dir} already contains images, skipping extraction.")
         return
 
     print(f"Extracting {zip_path.name} ...")

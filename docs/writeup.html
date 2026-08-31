@@ -1,0 +1,1055 @@
+<title>Photo Quality Classifier</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+  :root {
+    --paper:        #f4f2ec;
+    --surface:      #fbfaf6;
+    --surface-2:    #efece3;
+    --ink:          #1b1d1f;
+    --ink-soft:     #5b5e63;
+    --ink-faint:    #8c8f93;
+    --line:         #e3dfd4;
+    --line-strong:  #d0ccbe;
+    --accent:       #0f6168;
+    --accent-ink:   #0b4a50;
+    --accent-soft:  #e3efee;
+    --good:         #0a7d3f;
+    --bad:          #ac463b;
+
+    --s1: #2a78d6;   /* chart series - blue  */
+    --s2: #eb6834;   /* chart series - orange */
+    --s3: #1baf7a;   /* chart series - aqua  */
+    --chart-surface: #fbfaf6;
+    --grid:  #e7e3d8;
+    --axis:  #cbc6b8;
+    --dot-a: #a7a294;   /* dumbbell "before" */
+
+    --maxw: 940px;
+    --measure: 66ch;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:        #121417;
+      --surface:      #181b1f;
+      --surface-2:    #1e2226;
+      --ink:          #e9e7e1;
+      --ink-soft:     #a1a5ab;
+      --ink-faint:    #71757c;
+      --line:         #272b31;
+      --line-strong:  #363b43;
+      --accent:       #54c0c8;
+      --accent-ink:   #7fd3d9;
+      --accent-soft:  #16343880;
+      --good:         #46bd70;
+      --bad:          #e0796c;
+
+      --s1: #3987e5;
+      --s2: #d95926;
+      --s3: #199e70;
+      --chart-surface: #181b1f;
+      --grid:  #282c33;
+      --axis:  #3b414a;
+      --dot-a: #6b6f77;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:        #121417;
+    --surface:      #181b1f;
+    --surface-2:    #1e2226;
+    --ink:          #e9e7e1;
+    --ink-soft:     #a1a5ab;
+    --ink-faint:    #71757c;
+    --line:         #272b31;
+    --line-strong:  #363b43;
+    --accent:       #54c0c8;
+    --accent-ink:   #7fd3d9;
+    --accent-soft:  #16343880;
+    --good:         #46bd70;
+    --bad:          #e0796c;
+    --s1: #3987e5;
+    --s2: #d95926;
+    --s3: #199e70;
+    --chart-surface: #181b1f;
+    --grid:  #282c33;
+    --axis:  #3b414a;
+    --dot-a: #6b6f77;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+    font-weight: 400;
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  .doc { max-width: var(--maxw); margin: 0 auto; padding: clamp(28px, 6vw, 76px) clamp(20px, 5vw, 44px) 120px; }
+
+  /* ---------- type ---------- */
+  h1, h2, h3 { font-family: "Fraunces", Georgia, "Times New Roman", serif; font-weight: 600; line-height: 1.15; text-wrap: balance; margin: 0; }
+  .prose { max-width: var(--measure); }
+  p { margin: 0 0 1.05em; }
+  .prose > p:last-child { margin-bottom: 0; }
+  a { color: var(--accent); text-underline-offset: 2px; text-decoration-thickness: 1px; }
+  strong { font-weight: 600; }
+  em { font-style: italic; color: var(--ink); }
+  code, .mono { font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace; font-size: 0.86em; }
+  :not(pre) > code {
+    background: var(--surface-2);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.08em 0.36em;
+    white-space: nowrap;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin: 0 0 14px;
+  }
+
+  /* ---------- header ---------- */
+  .masthead { margin-bottom: 60px; }
+  .masthead h1 {
+    font-size: clamp(34px, 6.2vw, 58px);
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    margin: 0 0 18px;
+  }
+  .masthead .lede {
+    font-size: clamp(18px, 2.3vw, 21px);
+    color: var(--ink-soft);
+    max-width: 54ch;
+    margin: 0 0 26px;
+  }
+  .wedge { display: flex; height: 12px; width: 100%; max-width: 460px; border: 1px solid var(--line-strong); border-radius: 2px; overflow: hidden; background: var(--surface); }
+  .wedge span { flex: 1; background: var(--ink); }
+  .metarow {
+    display: flex; flex-wrap: wrap; gap: 8px 28px;
+    margin-top: 26px; padding-top: 20px; border-top: 1px solid var(--line);
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px; color: var(--ink-soft);
+  }
+  .metarow b { color: var(--ink); font-weight: 500; }
+
+  /* ---------- table of contents ---------- */
+  nav.toc { margin: 0 0 72px; }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 2px 30px; border-top: 1px solid var(--line-strong); }
+  nav.toc li { border-bottom: 1px solid var(--line); }
+  nav.toc a { display: flex; gap: 12px; padding: 11px 2px; text-decoration: none; color: var(--ink-soft); align-items: baseline; }
+  nav.toc a:hover { color: var(--accent); }
+  nav.toc .n { font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+
+  /* ---------- sections ---------- */
+  section { margin-bottom: 76px; scroll-margin-top: 24px; }
+  .sechead { display: grid; grid-template-columns: 3.2rem 1fr; gap: 4px 18px; align-items: baseline; border-top: 2px solid var(--ink); padding-top: 16px; margin-bottom: 30px; }
+  .sechead .num { font-family: "Fraunces", serif; font-size: 22px; font-weight: 500; color: var(--accent); font-feature-settings: "onum" 1; }
+  .sechead h2 { font-size: clamp(24px, 3.4vw, 33px); grid-column: 2; }
+  .sechead .sub { grid-column: 2; color: var(--ink-soft); font-size: 15px; margin-top: 6px; max-width: var(--measure); }
+
+  h3 { font-size: 20px; margin: 40px 0 14px; }
+  h3:first-of-type { margin-top: 0; }
+  .prose + .prose { margin-top: 1.05em; }
+
+  ul.list { max-width: var(--measure); margin: 0 0 1.05em; padding-left: 1.2em; }
+  ul.list li { margin-bottom: 0.5em; }
+  ul.list li::marker { color: var(--ink-faint); }
+
+  /* ---------- callouts ---------- */
+  .note {
+    max-width: var(--measure);
+    border-left: 2px solid var(--accent);
+    background: var(--accent-soft);
+    padding: 14px 18px;
+    margin: 24px 0;
+    font-size: 15.5px;
+    border-radius: 0 4px 4px 0;
+  }
+  .note .tag { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--accent-ink); display: block; margin-bottom: 5px; }
+  .note.warn { border-left-color: var(--bad); background: var(--surface-2); }
+  .note.warn .tag { color: var(--bad); }
+
+  /* ---------- figures / charts ---------- */
+  figure { margin: 32px 0; }
+  figure.wide { width: 100%; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 22px 22px 18px;
+  }
+  figcaption { font-size: 13.5px; color: var(--ink-soft); margin-top: 12px; max-width: var(--measure); }
+  figcaption b { color: var(--ink); font-weight: 500; }
+
+  .chart-title { font-family: "IBM Plex Sans", sans-serif; font-weight: 600; font-size: 15px; margin-bottom: 2px; }
+  .chart-sub { font-size: 12.5px; color: var(--ink-faint); margin-bottom: 14px; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 18px; margin-bottom: 12px; font-size: 12.5px; color: var(--ink-soft); }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 14px; height: 3px; border-radius: 2px; display: inline-block; }
+  .legend i.dot { width: 9px; height: 9px; border-radius: 50%; }
+
+  svg { display: block; width: 100%; height: auto; overflow: visible; }
+  svg text { font-family: "IBM Plex Mono", monospace; fill: var(--ink-faint); }
+  .tick line { stroke: var(--grid); stroke-width: 1; }
+  .axis-line { stroke: var(--axis); stroke-width: 1; }
+  .series-line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+  .end-dot { stroke: var(--chart-surface); stroke-width: 2; }
+  .val-label { fill: var(--ink); font-weight: 500; }
+
+  .tt {
+    position: fixed; pointer-events: none; z-index: 40; opacity: 0; transition: opacity .12s;
+    background: var(--ink); color: var(--paper);
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; line-height: 1.5;
+    padding: 7px 10px; border-radius: 5px; max-width: 240px;
+    box-shadow: 0 6px 20px rgba(0,0,0,.22);
+  }
+  .tt b { color: var(--paper); }
+
+  /* ---------- tables ---------- */
+  .tablewrap { overflow-x: auto; margin: 26px 0; border: 1px solid var(--line); border-radius: 8px; }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  caption { text-align: left; font-size: 13.5px; color: var(--ink-soft); padding: 12px 16px 0; caption-side: top; }
+  th, td { padding: 9px 14px; text-align: left; border-bottom: 1px solid var(--line); white-space: nowrap; }
+  thead th { font-family: "IBM Plex Mono", monospace; font-weight: 500; font-size: 11.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink-faint); background: var(--surface); }
+  tbody tr:last-child td { border-bottom: none; }
+  td.num, th.num { text-align: right; font-family: "IBM Plex Mono", monospace; font-variant-numeric: tabular-nums; }
+  tbody th { font-weight: 500; }
+  tr.hi td, tr.hi th { background: var(--accent-soft); }
+  .delta-up { color: var(--good); font-family: "IBM Plex Mono", monospace; font-size: 12.5px; }
+  .delta-dn { color: var(--bad); font-family: "IBM Plex Mono", monospace; font-size: 12.5px; }
+  .chip { display: inline-block; font-family: "IBM Plex Mono", monospace; font-size: 11px; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--line-strong); color: var(--ink-soft); }
+
+  /* ---------- stat strip ---------- */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin: 30px 0; }
+  .stat { background: var(--surface); padding: 18px 18px 16px; }
+  .stat .k { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+  .stat .v { font-family: "Fraunces", serif; font-size: 30px; font-weight: 500; margin-top: 6px; font-feature-settings: "onum" 1; line-height: 1; }
+  .stat .d { font-family: "IBM Plex Mono", monospace; font-size: 12px; margin-top: 6px; color: var(--ink-soft); }
+  .stat .d.up { color: var(--good); }
+
+  /* ---------- iteration blocks ---------- */
+  .iter { border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin: 28px 0; }
+  .iter > .head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 12px; padding: 16px 22px; background: var(--surface); border-bottom: 1px solid var(--line); }
+  .iter > .head .lbl { font-family: "IBM Plex Mono", monospace; font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--accent-ink); }
+  .iter > .head h3 { margin: 0; font-size: 19px; }
+  .iter > .head .tag { margin-left: auto; font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--ink-faint); }
+  .iter > .body { padding: 20px 22px 6px; }
+  .iter dl { display: grid; grid-template-columns: 7.5rem 1fr; gap: 4px 20px; margin: 0 0 4px; }
+  .iter dt { font-family: "IBM Plex Mono", monospace; font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); padding-top: 4px; }
+  .iter dd { margin: 0 0 16px; max-width: 60ch; }
+  .iter dd:last-child { margin-bottom: 12px; }
+
+  hr.rule { border: none; border-top: 1px solid var(--line); margin: 30px 0; }
+
+  .foot { margin-top: 90px; padding-top: 24px; border-top: 2px solid var(--ink); font-size: 13.5px; color: var(--ink-soft); }
+  .foot code { font-size: 12px; }
+
+  @media (max-width: 640px) {
+    body { font-size: 16px; }
+    .sechead { grid-template-columns: 1fr; gap: 2px; }
+    .sechead h2, .sechead .sub { grid-column: 1; }
+    .iter dl { grid-template-columns: 1fr; }
+    .iter dt { padding-top: 10px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="doc">
+
+  <header class="masthead">
+    <p class="eyebrow">Project build log &nbsp;/&nbsp; computer vision</p>
+    <h1>Photo Quality Classifier</h1>
+    <p class="lede">A convolutional network, trained from scratch, that inspects a photograph and flags five kinds of defect at once: blur, underexposure, overexposure, sensor noise, and low contrast.</p>
+    <div class="wedge" id="wedge" aria-hidden="true"></div>
+    <div class="metarow">
+      <span>Task&nbsp; <b>multi-label classification</b></span>
+      <span>Data&nbsp; <b>750 photos &rarr; 5,125 labelled examples</b></span>
+      <span>Model&nbsp; <b>4-stage CNN, 8.8M params</b></span>
+      <span>Result&nbsp; <b>macro-F1 0.85 &rarr; 0.91</b></span>
+    </div>
+  </header>
+
+  <nav class="toc" aria-label="Contents">
+    <ol>
+      <li><a href="#summary"><span class="n">00</span><span>Summary</span></a></li>
+      <li><a href="#task"><span class="n">01</span><span>The task &amp; why these choices</span></a></li>
+      <li><a href="#data"><span class="n">02</span><span>Data pipeline</span></a></li>
+      <li><a href="#model"><span class="n">03</span><span>The baseline model</span></a></li>
+      <li><a href="#metrics"><span class="n">04</span><span>How the model is judged</span></a></li>
+      <li><a href="#iterations"><span class="n">05</span><span>Four iterations</span></a></li>
+      <li><a href="#results"><span class="n">06</span><span>Final results</span></a></li>
+      <li><a href="#ledger"><span class="n">07</span><span>Decision ledger</span></a></li>
+      <li><a href="#repro"><span class="n">08</span><span>Reproducibility</span></a></li>
+      <li><a href="#limits"><span class="n">09</span><span>Limitations &amp; next steps</span></a></li>
+    </ol>
+  </nav>
+
+  <!-- ============ 00 SUMMARY ============ -->
+  <section id="summary">
+    <div class="sechead">
+      <span class="num">00</span>
+      <h2>Summary</h2>
+      <p class="sub">What was built, and what four rounds of diagnosis-driven changes bought.</p>
+    </div>
+
+    <div class="prose">
+      <p>The goal was to learn how a machine-learning project actually works by building one end to end: a from-scratch CNN that multi-label-classifies images for quality defects, with a future image-enhancement phase in mind. No transfer learning &mdash; the point was the fundamentals.</p>
+      <p>There is no public dataset of photos labelled &ldquo;blurry&rdquo; or &ldquo;underexposed,&rdquo; so the dataset was <strong>synthesised</strong>: 750 clean photos from COCO were each degraded five ways with controlled image maths, giving 4,500 single-defect images plus a matched clean copy of every scene. The split, the labels, and a small set of deliberately <em>multi-defect</em> test images were all designed to keep the evaluation honest.</p>
+      <p>The first model scored a respectable <strong>macro-F1 0.85</strong> on single-defect images but collapsed on stacked defects (<strong>0.53</strong>), and one class &mdash; noise &mdash; lagged the rest badly. Each of the next three iterations targeted one diagnosed problem. The final model was measured once on the held-out <strong>test set</strong>: <strong>macro-F1 0.911</strong> on single-defect images (validation had predicted 0.909 &mdash; the two agree, which is the sign the iterations were principled and not fitted to the validation set) and <strong>0.883</strong> on the multi-defect probe. Noise is recovered and the overfitting gap is essentially closed.</p>
+    </div>
+
+    <p class="eyebrow" style="margin-bottom:12px">Held-out test set &nbsp;/&nbsp; model frozen, threshold 0.5, measured once</p>
+    <div class="stats">
+      <div class="stat">
+        <div class="k">macro-F1, single-defect</div>
+        <div class="v">0.911</div>
+        <div class="d up">&#9650; from 0.853</div>
+      </div>
+      <div class="stat">
+        <div class="k">macro-F1, multi-defect</div>
+        <div class="v">0.883</div>
+        <div class="d up">&#9650; from 0.530</div>
+      </div>
+      <div class="stat">
+        <div class="k">noise F1 (single)</div>
+        <div class="v">0.843</div>
+        <div class="d up">&#9650; from 0.700</div>
+      </div>
+      <div class="stat">
+        <div class="k">noise F1 (multi-defect)</div>
+        <div class="v">0.863</div>
+        <div class="d up">&#9650; from 0.071</div>
+      </div>
+      <div class="stat">
+        <div class="k">train / val loss gap</div>
+        <div class="v">1.1&times;</div>
+        <div class="d up">&#9650; from 3.2&times;</div>
+      </div>
+    </div>
+
+    <figure class="wide">
+      <div class="card">
+        <div class="chart-title">Metric trajectory across the four iterations</div>
+        <div class="chart-sub">Validation set. Higher is better; each x-step is a cumulative change to the model or its data.</div>
+        <div class="legend" id="lg-traj"></div>
+        <div id="chart-traj"></div>
+      </div>
+      <figcaption>The single-defect score (<b>blue</b>) barely moved until iteration&nbsp;4, but that was never the problem. The multi-defect scores (<b>orange</b>, <b>aqua</b>) were the story: near-zero noise detection on stacked defects at the start, recovered only once the model was shown stacked defects during training. The iteration&nbsp;4 point held on the test set: <b>0.911</b> single-defect, <b>0.883</b> multi-defect.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 01 TASK ============ -->
+  <section id="task">
+    <div class="sechead">
+      <span class="num">01</span>
+      <h2>The task &amp; why these choices</h2>
+      <p class="sub">Four decisions were fixed up front. Each has a reason that shaped everything downstream.</p>
+    </div>
+
+    <h3>Multi-label, not multi-class</h3>
+    <div class="prose">
+      <p>A single photo can be blurry <em>and</em> underexposed <em>and</em> noisy at the same time. The five defects are not mutually exclusive, so the model has <strong>five independent yes/no outputs</strong>, each with its own sigmoid &mdash; not a single softmax that forces one winner. Conceptually it is five detectors sharing one feature-extraction backbone.</p>
+    </div>
+
+    <h3>A CNN trained from scratch</h3>
+    <div class="prose">
+      <p>Transfer learning was ruled out deliberately. The defects here are <strong>low-level visual statistics</strong> &mdash; the presence or absence of high-frequency edges, the spread of the brightness histogram, the amount of random pixel-to-pixel variation &mdash; not object semantics. A shallow network is genuinely well-matched to that, and building it from nothing is where the learning is.</p>
+    </div>
+
+    <h3>Labels in a CSV, not folders</h3>
+    <div class="prose">
+      <p>Folder-per-class cannot represent an image that belongs to two classes. The labels live in a single CSV with one binary column per defect (<code>filename,blur,underexposed,overexposed,noise,contrast</code>); a clean image is a row of zeros, a two-defect image has two ones. This is the mechanism that makes multi-label possible at all.</p>
+    </div>
+
+    <h3>Built with a phase 2 in mind</h3>
+    <div class="prose">
+      <p>A later phase will attempt to <em>repair</em> each detected defect. Every pipeline decision was checked against that: the degradation functions are written as standalone <code>image &rarr; image</code> transforms so they can be reused to generate training pairs for a restoration model later.</p>
+    </div>
+  </section>
+
+  <!-- ============ 02 DATA ============ -->
+  <section id="data">
+    <div class="sechead">
+      <span class="num">02</span>
+      <h2>Data pipeline</h2>
+      <p class="sub">Four scripts, run in order: source &rarr; degrade &rarr; split &rarr; add stacked-defect probes.</p>
+    </div>
+
+    <h3>Source images &mdash; <span class="mono">download_raw_images.py</span></h3>
+    <div class="prose">
+      <p>750 photos were sampled from the COCO <span class="mono">val2017</span> set and filtered to be <strong>clean baselines</strong>: minimum dimension 300&nbsp;px, mean brightness between 40 and 220, and a Laplacian-variance sharpness above 60. The synthetic defect must be the <em>only</em> source of degradation, so anything already dark, blown-out, or soft was rejected.</p>
+    </div>
+
+    <h3>Synthetic defects &mdash; <span class="mono">generate_synthetic.py</span></h3>
+    <div class="prose">
+      <p>Each raw image produces six outputs: one untouched clean copy plus one image per defect. 750&nbsp;&times;&nbsp;6&nbsp;=&nbsp;<strong>4,500 images</strong> (~2.0&nbsp;GB, saved as PNG so lossless &mdash; JPEG re-compression would add its own artefacts and muddy the noise class). Severity is <strong>randomised per image</strong> within a range, so the model learns &ldquo;blur, generally&rdquo; rather than &ldquo;blur at exactly one strength.&rdquo; Everything is seeded.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <caption>The five degradations. All maths is done in float, then <code>clip(0, 255)</code>, then cast back to 8-bit &mdash; an unclipped cast wraps, turning a bright pixel black.</caption>
+        <thead>
+          <tr><th>Defect</th><th>Operation</th><th>Knob &amp; range</th><th>Why this operation</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>blur</th><td>Gaussian blur</td><td class="num">sigma 1.0 &ndash; 4.0</td><td>weighted neighbourhood average; models lens defocus better than a box blur</td></tr>
+          <tr><th>underexposed</th><td>pixels &times; factor</td><td class="num">0.30 &ndash; 0.60</td><td>multiply, not subtract &mdash; low light scales light proportionally, it doesn't crush shadows to black</td></tr>
+          <tr><th>overexposed</th><td>pixels &times; factor, then clip</td><td class="num">1.60 &ndash; 2.60</td><td>the clipping at 255 <em>is</em> the blown-highlight look</td></tr>
+          <tr><th>noise</th><td>add zero-mean Gaussian</td><td class="num">sigma 8 &ndash; 30</td><td>each pixel nudged up or down at random; models high-ISO sensor grain</td></tr>
+          <tr><th>contrast</th><td>mean + (px &minus; mean) &times; factor</td><td class="num">0.30 &ndash; 0.60</td><td>pull every pixel toward the image's average brightness &mdash; compresses the histogram, the definition of low contrast</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Train / val / test split &mdash; <span class="mono">split_dataset.py</span></h3>
+    <div class="prose">
+      <p>The split is done at the <strong>scene</strong> level, not the image level. All six variants of <code>raw_0123</code> come from the same photograph &mdash; same objects, same composition. If <code>raw_0123_blur.png</code> were in training and <code>raw_0123_noise.png</code> in validation, the model would have effectively seen that scene during training, and the validation score would be inflated. This is <strong>group leakage</strong>, and the fix is to assign each of the 750 scene IDs to exactly one split.</p>
+      <p>A seeded shuffle of the scene IDs, cut <strong>70 / 15 / 15</strong> &rarr; 525 / 112 / 113 scenes = 3,150 / 672 / 678 images. The script asserts the three ID sets are disjoint before writing.</p>
+    </div>
+
+    <h3>Multi-defect probe images &mdash; <span class="mono">generate_combos.py</span></h3>
+    <div class="prose">
+      <p>Training images are kept to one defect each &mdash; simpler to generate and label. But real bad photos stack defects: low light raises sensor noise; darkness hides softness. Whether a model trained on single defects <em>generalises</em> to combinations is a hypothesis, not a given, so validation and test each get <strong>50 genuine multi-defect images</strong> (30 two-defect, 20 three-defect) as a held-out probe.</p>
+    </div>
+    <ul class="list">
+      <li>Generated only from scenes already assigned to val / test &mdash; the leakage rule still holds.</li>
+      <li>The impossible pair (underexposed <em>and</em> overexposed) is excluded &rarr; 9 valid pairs, 7 valid triples, covered round-robin.</li>
+      <li>Transforms are stacked in a fixed physical order: <span class="mono">contrast &rarr; underexposed &rarr; overexposed &rarr; blur &rarr; noise</span>. A real camera blurs at the lens, then the sensor adds noise on readout &mdash; blurring <em>after</em> noise would smear the grain and look fake.</li>
+      <li>A combo is not a new class. <code>raw_0700_combo_blur_noise.png</code> is simply a row with two ones.</li>
+    </ul>
+
+    <div class="note">
+      <span class="tag">Class balance</span>
+      Every scene contributes exactly one of each defect, so the classes are balanced against <em>each other</em> from the start (~17% positive each). Within any one class, &ldquo;not present&rdquo; outnumbers &ldquo;present&rdquo; about 5&nbsp;:&nbsp;1 &mdash; mild imbalance, and the reason plain accuracy is not used as a metric (a do-nothing model scores 83%).
+    </div>
+  </section>
+
+  <!-- ============ 03 MODEL ============ -->
+  <section id="model">
+    <div class="sechead">
+      <span class="num">03</span>
+      <h2>The baseline model</h2>
+      <p class="sub">Deliberately simple &mdash; a first architecture to beat, not a tuned one.</p>
+    </div>
+
+    <div class="prose">
+      <p>Four convolutional stages extract features; a small head turns them into five scores. Each stage is <span class="mono">Conv 3&times;3 &rarr; ReLU &rarr; MaxPool 2</span>: the convolution slides learned filters across the image, ReLU clips negatives to zero (so stacking layers isn't equivalent to one layer), and max-pooling halves the height and width.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Forward pass. Channels grow as spatial size shrinks &mdash; trading picture size for feature variety.</caption>
+        <thead><tr><th>Stage</th><th>Operation</th><th>Output shape</th></tr></thead>
+        <tbody>
+          <tr><th>input</th><td>RGB image</td><td class="num">3 &times; 256 &times; 256</td></tr>
+          <tr><th>conv 1</th><td>3&rarr;32, ReLU, pool</td><td class="num">32 &times; 128 &times; 128</td></tr>
+          <tr><th>conv 2</th><td>32&rarr;64, ReLU, pool</td><td class="num">64 &times; 64 &times; 64</td></tr>
+          <tr><th>conv 3</th><td>64&rarr;128, ReLU, pool</td><td class="num">128 &times; 32 &times; 32</td></tr>
+          <tr><th>conv 4</th><td>128&rarr;256, ReLU, pool</td><td class="num">256 &times; 16 &times; 16</td></tr>
+          <tr><th>flatten</th><td>&mdash;</td><td class="num">65,536</td></tr>
+          <tr><th>dense</th><td>65,536&rarr;128, ReLU</td><td class="num">128</td></tr>
+          <tr><th>output</th><td>128&rarr;5</td><td class="num">5 logits</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose">
+      <p><strong>8,777,797 parameters</strong> &mdash; about 8.4M of them in that first dense layer (65,536&nbsp;&times;&nbsp;128). That is a lot of capacity relative to 3,150 training images, and it is the obvious place for the model to overfit. The plan was to watch the loss curves and only address it if they showed it.</p>
+      <p>The model outputs raw scores (logits), not probabilities. <code>BCEWithLogitsLoss</code> applies the sigmoid internally, per class, in a numerically stabler way; probabilities are taken with an explicit sigmoid only at evaluation. Optimiser: Adam at <span class="mono">1e-3</span>, batch size 32.</p>
+    </div>
+  </section>
+
+  <!-- ============ 04 METRICS ============ -->
+  <section id="metrics">
+    <div class="sechead">
+      <span class="num">04</span>
+      <h2>How the model is judged</h2>
+      <p class="sub">Accuracy is misleading here. These are the metrics that fit a multi-label, mildly imbalanced problem.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Computed per class, then summarised.</caption>
+        <thead><tr><th>Metric</th><th>Question it answers</th><th>Role</th></tr></thead>
+        <tbody>
+          <tr><th>precision</th><td>when the model says &ldquo;defect,&rdquo; how often is it right?</td><td>punishes false alarms</td></tr>
+          <tr><th>recall</th><td>of the images that really have the defect, how many are caught?</td><td>punishes misses</td></tr>
+          <tr><th>F1</th><td>balance of the two above</td><td>per-class summary</td></tr>
+          <tr class="hi"><th>macro-F1</th><td>plain average of the five per-class F1s</td><td><b>headline number</b> for comparing versions</td></tr>
+          <tr><th>PR-AUC</th><td>are the model's probabilities <em>ranked</em> well, regardless of the 0.5 cutoff?</td><td>diagnostic &mdash; see below</td></tr>
+          <tr><th>subset accuracy</th><td>fraction of images with all five labels exactly right</td><td>strict sanity check</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose">
+      <p><strong>PR-AUC earned its place as the key diagnostic.</strong> F1 is measured at one fixed threshold (0.5). PR-AUC ignores the threshold and asks whether, if you sorted every image by its predicted probability, the truly-defective ones would sit near the top. That distinction is what separates two very different failures:</p>
+    </div>
+    <ul class="list">
+      <li><strong>Low PR-AUC and low F1</strong> &rarr; the model genuinely cannot see the defect. Fix the data or the features.</li>
+      <li><strong>High PR-AUC but low F1</strong> &rarr; the model <em>can</em> see it; the cutoff is just in the wrong place. Cheap fix.</li>
+    </ul>
+    <div class="prose">
+      <p>Twice in this project the second pattern appeared, and reading it correctly is what pointed to the right next step both times. Plain accuracy and micro-F1 are deliberately not reported &mdash; the first is dominated by the easy &ldquo;no defect&rdquo; majority, the second is redundant when the classes are balanced.</p>
+    </div>
+  </section>
+
+  <!-- ============ 05 ITERATIONS ============ -->
+  <section id="iterations">
+    <div class="sechead">
+      <span class="num">05</span>
+      <h2>Four iterations</h2>
+      <p class="sub">Each round changed one thing, aimed at one diagnosed problem, and was compared on the validation set. The test set was never touched.</p>
+    </div>
+
+    <!-- iter 1 -->
+    <div class="iter">
+      <div class="head"><span class="lbl">Iteration 1</span><h3>Baseline</h3><span class="tag">resize &middot; 10 epochs</span></div>
+      <div class="body">
+        <dl>
+          <dt>Setup</dt>
+          <dd>The architecture above. Images resized (squished) to 256&times;256, pixels scaled to [0,1]. No augmentation.</dd>
+          <dt>Result</dt>
+          <dd>Single-defect validation <strong>macro-F1 0.853</strong>. Multi-defect <strong>macro-F1 0.530</strong>. Every class landed at F1 0.83&ndash;0.94 <em>except noise, at 0.700</em> &mdash; and noise was the only class whose PR-AUC (0.79) was also low.</dd>
+          <dt>Read</dt>
+          <dd>Three problems. <strong>(a)</strong> Noise is weak on <em>every</em> metric including PR-AUC &mdash; a genuine signal problem, not a threshold one. <strong>(b)</strong> Mild overfitting: training loss 0.07 against validation loss 0.23 at epoch 10, with validation flat since epoch 4. <strong>(c)</strong> On multi-defect images, precision is a perfect 1.00 but recall is 0.41 &mdash; the model detects stacked defects (PR-AUC stays high) but its confidence sits below 0.5, so they read as misses.</dd>
+          <dt>Root cause</dt>
+          <dd>Why noise specifically? The last step before the model resized ~600&nbsp;px photos down to 256. Downscaling <em>averages</em> neighbouring pixels, and averaging is exactly how you remove random noise. Noise is the one defect the pre-processing destroys.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <!-- iter 2 -->
+    <div class="iter">
+      <div class="head"><span class="lbl">Iteration 2</span><h3>Grain-preserving crop</h3><span class="tag">crop &middot; 10 epochs</span></div>
+      <div class="body">
+        <dl>
+          <dt>Change</dt>
+          <dd>Replace &ldquo;squish to 256&times;256&rdquo; with &ldquo;resize the short side to 256, then take a 256&times;256 crop&rdquo; &mdash; a random crop for training (which doubles as augmentation), a centre crop for val/test. A crop keeps native pixel detail, so the grain survives.</dd>
+          <dt>Why</dt>
+          <dd>Directly targets the diagnosed root cause. The maths that erased the noise was the aggressive resize; a crop barely resizes at all.</dd>
+          <dt>Result</dt>
+          <dd>At the 0.5 threshold, a <strong>wash</strong>: macro-F1 0.845 vs 0.853, noise F1 slightly <em>down</em> at 0.675. But noise <strong>PR-AUC rose 0.79&nbsp;&rarr;&nbsp;0.83</strong>, blur and contrast PR-AUC also rose, and the overfitting gap narrowed from 3.2&times; to 2.4&times;.</dd>
+          <dt>Read</dt>
+          <dd>The random crop is augmentation, so the model overfits less &rarr; it is less overconfident &rarr; its probabilities drift below 0.5 across the board (macro-precision up, macro-recall down). The <em>signal</em> improved; the threshold is now in the wrong place. &ldquo;Good ranking, wrong cutoff.&rdquo;</dd>
+        </dl>
+      </div>
+    </div>
+
+    <!-- iter 3 -->
+    <div class="iter">
+      <div class="head"><span class="lbl">Iteration 3</span><h3>Per-class threshold tuning</h3><span class="tag">no retraining</span></div>
+      <div class="body">
+        <dl>
+          <dt>Change</dt>
+          <dd>For each class, sweep the decision threshold 0.05&ndash;0.95 and keep whichever value maximises that class's F1 on the validation set. No retraining &mdash; it re-uses the probabilities the model already produced. Run on <em>both</em> the baseline and the crop checkpoint, so the comparison is tuned-vs-tuned.</dd>
+          <dt>Why</dt>
+          <dd>Iteration 2 left an open question: was the crop's PR-AUC gain real, or noise? A threshold sweep converts a better ranking into a better F1 &mdash; if the ranking genuinely improved, tuning will show it.</dd>
+          <dt>Result</dt>
+          <dd>The crop model wins on every metric once both are tuned. The decisive detail: <strong>the baseline's noise F1 could not be improved by any threshold</strong> (0.700 &rarr; 0.700, identical) &mdash; its ranking was too jumbled. The crop model's noise F1 tuned up to 0.746, because its better ranking had something to work with.</dd>
+        </dl>
+
+        <div class="tablewrap">
+          <table>
+            <caption>Both checkpoints, per-class thresholds tuned on validation.</caption>
+            <thead><tr><th>Metric (tuned)</th><th class="num">Baseline</th><th class="num">Crop</th></tr></thead>
+            <tbody>
+              <tr><th>macro-F1, single-defect</th><td class="num">0.863</td><td class="num">0.876</td></tr>
+              <tr><th>macro-F1, multi-defect</th><td class="num">0.605</td><td class="num">0.684</td></tr>
+              <tr class="hi"><th>noise F1, single-defect</th><td class="num">0.700</td><td class="num">0.746</td></tr>
+              <tr class="hi"><th>noise F1, multi-defect</th><td class="num">0.071</td><td class="num">0.364</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <dl>
+          <dt>Decision</dt>
+          <dd>Keep the crop pipeline. Threshold tuning stays as a <em>diagnostic</em> that proved the point &mdash; it is not part of the shipped model (see iteration 4).</dd>
+        </dl>
+      </div>
+    </div>
+
+    <!-- iter 4 -->
+    <div class="iter">
+      <div class="head"><span class="lbl">Iteration 4</span><h3>Stacked defects in training</h3><span class="tag">crop + 525 train combos &middot; 15 epochs</span></div>
+      <div class="body">
+        <dl>
+          <dt>Change</dt>
+          <dd>Add <strong>525 multi-defect images to the training set</strong> (from training scenes only), and train for 15 epochs instead of 10. Same architecture, same crop pipeline.</dd>
+          <dt>Why</dt>
+          <dd>On multi-defect images the model's noise PR-AUC was <em>0.91</em> &mdash; the ranking was excellent &mdash; but its F1 was ~0.36. High PR-AUC, low F1: not a visibility problem, a <strong>calibration</strong> problem. The model's confidence collapsed on stacked defects because it had only ever trained on single ones. The fix is to show it stacked defects.</dd>
+          <dt>Result</dt>
+          <dd>Single-defect <strong>macro-F1 0.909</strong>, multi-defect <strong>macro-F1 0.905</strong>. Noise F1 rose to 0.88 on single-defect images and <strong>0.88 on multi-defect</strong> (from 0.07&ndash;0.36). Overfitting essentially gone: training loss 0.097 against validation loss 0.110 at the best epoch &mdash; a 1.1&times; gap, down from 3.2&times;.</dd>
+          <dt>Threshold</dt>
+          <dd>Tuning now buys almost nothing (+0.008 on single-defect, &minus;0.009 on multi-defect &mdash; one threshold set can't serve both). The shipped model uses a <strong>plain 0.5</strong> for every class, which also avoids a &ldquo;thresholds were fitted on validation&rdquo; caveat.</dd>
+          <dt>Caveat</dt>
+          <dd>This round changed two things (combos <em>and</em> epoch count). The multi-defect gains are almost certainly the training combos &mdash; extra epochs cannot teach stacked defects &mdash; but the single-defect noise gain is partly the extra noise data and partly the longer schedule.</dd>
+        </dl>
+      </div>
+    </div>
+
+    <figure class="wide">
+      <div class="card">
+        <div class="chart-title">Per-class F1: baseline &rarr; final model</div>
+        <div class="chart-sub">Validation, single-defect images, threshold 0.5. Left dot is iteration 1, right dot is iteration 4.</div>
+        <div class="legend">
+          <span><i class="dot" style="background:var(--dot-a)"></i>baseline</span>
+          <span><i class="dot" style="background:var(--s1)"></i>final</span>
+        </div>
+        <div id="chart-dumbbell"></div>
+      </div>
+      <figcaption>Noise closes almost the entire gap to the rest of the pack. Overexposed slips slightly (<b>&minus;0.03</b>) &mdash; the extra multi-defect training data traded a little of its precision for a large gain elsewhere.</figcaption>
+    </figure>
+
+    <figure class="wide">
+      <div class="card">
+        <div class="chart-title">Overfitting: training vs validation loss</div>
+        <div class="chart-sub">Binary cross-entropy per epoch. A widening gap means the model is memorising.</div>
+        <div class="legend">
+          <span><i style="background:var(--s1)"></i>training loss</span>
+          <span><i style="background:var(--s2)"></i>validation loss</span>
+        </div>
+        <div id="chart-loss"></div>
+      </div>
+      <figcaption>Iteration 1 (left): validation loss flatlines near 0.23 while training loss keeps dropping to 0.07 &mdash; the classic memorising signal. Iteration 4 (right): the two curves track each other down to ~0.10. The 525 training combos and the random-crop augmentation regularise the model; validation even dips below training early on, because a random crop makes a training image harder than the fixed centre crop used for validation.</figcaption>
+    </figure>
+  </section>
+
+  <!-- ============ 06 RESULTS ============ -->
+  <section id="results">
+    <div class="sechead">
+      <span class="num">06</span>
+      <h2>Final results</h2>
+      <p class="sub">Frozen model: <span class="mono">traincombo_best.pt</span> (epoch 14) at threshold 0.5.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <caption><b>Test set</b>, threshold 0.5 &mdash; measured once, model frozen. Single-defect = the 678 one-defect and clean images; multi-defect = the 50 held-out stacked-defect probes.</caption>
+        <thead>
+          <tr><th>Class</th><th class="num">P</th><th class="num">R</th><th class="num">F1</th><th class="num">PR-AUC</th><th class="num">F1 (multi-defect)</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>blur</th><td class="num">0.933</td><td class="num">0.900</td><td class="num">0.916</td><td class="num">0.977</td><td class="num">0.833</td></tr>
+          <tr><th>underexposed</th><td class="num">0.894</td><td class="num">0.969</td><td class="num">0.930</td><td class="num">0.969</td><td class="num">0.970</td></tr>
+          <tr><th>overexposed</th><td class="num">0.882</td><td class="num">0.902</td><td class="num">0.892</td><td class="num">0.955</td><td class="num">0.824</td></tr>
+          <tr><th>noise</th><td class="num">0.834</td><td class="num">0.852</td><td class="num">0.843</td><td class="num">0.938</td><td class="num">0.863</td></tr>
+          <tr><th>contrast</th><td class="num">0.985</td><td class="num">0.964</td><td class="num">0.975</td><td class="num">0.995</td><td class="num">0.926</td></tr>
+          <tr class="hi"><th>macro</th><td class="num">0.906</td><td class="num">0.918</td><td class="num">0.911</td><td class="num">0.967</td><td class="num">0.883</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="note">
+      <span class="tag">Validation vs test</span>
+      Single-defect macro-F1: validation predicted <strong>0.909</strong>, test delivered <strong>0.911</strong> &mdash; they match, so the four iterations were not quietly fitting the validation set. Multi-defect macro-F1 came in at <strong>0.883</strong> on test against 0.905 on validation; the ~0.02 drop is within the noise of a 50-image probe. Tuned per-class thresholds were tried on test <em>for reference</em> and scored 0.907 &mdash; slightly <em>worse</em> than plain 0.5, which confirms shipping at 0.5 was right.
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <caption>Validation set, threshold 0.5 &mdash; the development-time numbers each iteration was judged against, shown for comparison.</caption>
+        <thead>
+          <tr><th>Class</th><th class="num">P</th><th class="num">R</th><th class="num">F1</th><th class="num">PR-AUC</th><th class="num">F1 (multi-defect)</th></tr>
+        </thead>
+        <tbody>
+          <tr><th>blur</th><td class="num">0.918</td><td class="num">0.885</td><td class="num">0.901</td><td class="num">0.967</td><td class="num">0.875</td></tr>
+          <tr><th>underexposed</th><td class="num">0.956</td><td class="num">0.977</td><td class="num">0.966</td><td class="num">0.995</td><td class="num">1.000</td></tr>
+          <tr><th>overexposed</th><td class="num">0.890</td><td class="num">0.869</td><td class="num">0.879</td><td class="num">0.943</td><td class="num">0.848</td></tr>
+          <tr><th>noise</th><td class="num">0.838</td><td class="num">0.928</td><td class="num">0.881</td><td class="num">0.946</td><td class="num">0.875</td></tr>
+          <tr><th>contrast</th><td class="num">0.871</td><td class="num">0.964</td><td class="num">0.915</td><td class="num">0.951</td><td class="num">0.929</td></tr>
+          <tr class="hi"><th>macro</th><td class="num">0.894</td><td class="num">0.925</td><td class="num">0.909</td><td class="num">0.960</td><td class="num">0.905</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="prose">
+      <p>On test, <strong>contrast is the strongest class</strong> (F1 0.975) and <strong>noise the weakest</strong> (0.843) &mdash; noise closed most, but not all, of its original gap. Overexposed is the weakest on multi-defect images (F1 0.824, recall 0.70): a three-way stack that includes a global brightness lift is still where the model most often misses.</p>
+    </div>
+  </section>
+
+  <!-- ============ 07 LEDGER ============ -->
+  <section id="ledger">
+    <div class="sechead">
+      <span class="num">07</span>
+      <h2>Decision ledger</h2>
+      <p class="sub">Every non-obvious choice, why it was made, and what it moved.</p>
+    </div>
+
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th>Decision</th><th>Reason</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr>
+            <th>Multi-hot CSV labels</th>
+            <td>folders can't hold an image with two defects</td>
+            <td>makes the task expressible at all</td>
+          </tr>
+          <tr>
+            <th>Synthetic degradation, randomised severity</th>
+            <td>no labelled defect dataset exists; a range teaches robustness</td>
+            <td>4,500 labelled images from 750 photos</td>
+          </tr>
+          <tr>
+            <th>Scene-level split</th>
+            <td>image-level scatters a scene's six variants across splits &rarr; leakage</td>
+            <td>an honest validation score from iteration 1</td>
+          </tr>
+          <tr>
+            <th>Held-out multi-defect probes</th>
+            <td>single-defect training may not generalise to stacked defects</td>
+            <td>exposed a real gap: multi-defect macro-F1 0.53 vs single 0.85</td>
+          </tr>
+          <tr>
+            <th>Shallow from-scratch CNN</th>
+            <td>defects are low-level signals, not object semantics</td>
+            <td>baseline macro-F1 0.85, ~8.8M params</td>
+          </tr>
+          <tr class="hi">
+            <th>Resize &rarr; grain-preserving crop</th>
+            <td>downscaling averages away the noise grain</td>
+            <td>noise PR-AUC 0.79 &rarr; 0.83; overfit gap 3.2&times; &rarr; 2.4&times;</td>
+          </tr>
+          <tr>
+            <th>Per-class threshold sweep</th>
+            <td>separate &ldquo;can't detect&rdquo; from &ldquo;wrong cutoff&rdquo;</td>
+            <td>proved the crop's noise-signal gain was real</td>
+          </tr>
+          <tr class="hi">
+            <th>525 combos into training</th>
+            <td>multi-defect PR-AUC high, F1 low &rarr; calibration, not visibility</td>
+            <td>multi-defect macro-F1 0.68 &rarr; 0.90; noise multi-defect F1 0.36 &rarr; 0.88; overfit gap &rarr; 1.1&times;</td>
+          </tr>
+          <tr>
+            <th>Ship at threshold 0.5</th>
+            <td>tuning is now a wash; avoids a &ldquo;fitted on validation&rdquo; caveat</td>
+            <td>macro-F1 0.909 single / 0.905 multi-defect</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ============ 08 REPRO ============ -->
+  <section id="repro">
+    <div class="sechead">
+      <span class="num">08</span>
+      <h2>Reproducibility</h2>
+      <p class="sub">Everything is seeded (42) and scripted.</p>
+    </div>
+
+    <div class="prose">
+      <p>Data pipeline, in order:</p>
+    </div>
+    <ul class="list">
+      <li><code>src/download_raw_images.py</code> &mdash; COCO subset &rarr; <code>data/raw/</code></li>
+      <li><code>src/generate_synthetic.py</code> &mdash; degradations &rarr; <code>data/synthetic/</code> + <code>labels.csv</code></li>
+      <li><code>src/split_dataset.py</code> &mdash; adds the <code>split</code> column, scene-level</li>
+      <li><code>src/generate_combos.py</code> &mdash; multi-defect probes; <code>--n-train 525</code> adds the training combos</li>
+    </ul>
+    <div class="prose">
+      <p>Reusable modules: <code>src/dataset.py</code> (the <code>Dataset</code> and loaders; <code>augment=True</code> switches on the crop pipeline), <code>src/model.py</code> (<code>BaselineCNN</code>), <code>src/metrics.py</code> (per-class metrics, PR-AUC, <code>tune_thresholds</code>).</p>
+      <p>Each iteration is a notebook &mdash; <code>01_baseline</code>, <code>02_crop</code>, <code>03_threshold_tuning</code>, <code>04_train_combos</code> &mdash; that writes its checkpoint and per-epoch history to <code>models/</code>. Earlier notebooks are left frozen as the reference for each stage.</p>
+      <p>Environment: conda (<code>imageQuality_Classifier</code>), PyTorch on a single RTX&nbsp;3050. A full training run is a few minutes.</p>
+    </div>
+  </section>
+
+  <!-- ============ 09 LIMITS ============ -->
+  <section id="limits">
+    <div class="sechead">
+      <span class="num">09</span>
+      <h2>Limitations &amp; next steps</h2>
+      <p class="sub">What this model is not, and where it goes.</p>
+    </div>
+
+    <ul class="list">
+      <li><strong>The multi-defect probe is no longer a pure generalisation test.</strong> Once combos entered training, the val/test combos measure &ldquo;does combo training transfer to unseen scenes,&rdquo; not &ldquo;does single-defect training generalise for free.&rdquo; Both are valid; the claim changed.</li>
+      <li><strong>Noise is still the weakest single-defect class</strong> (test F1 0.843) and <strong>overexposed the weakest on stacked defects</strong> (test F1 0.824, recall 0.70). Either is a candidate for a fifth iteration if one is warranted.</li>
+      <li><strong>Defects are globally uniform.</strong> The synthetic degradations affect the whole frame evenly. Real photos have localised blur (a sharp subject on a soft background) and localised blown highlights &mdash; the model has never seen those, and the Streamlit upload path will need to account for it (evaluate several crops, or centre-crop).</li>
+      <li><strong>The multi-defect probe is small</strong> (50 images per split). The ~0.02 validation-to-test drop on multi-defect macro-F1 is within its sampling noise; a larger probe would tighten that estimate.</li>
+      <li><strong>Iteration 4 is confounded</strong> (combos + epochs). A clean 15-epoch re-run of iteration 3 would disentangle them; it was skipped on time grounds since the direction is unambiguous.</li>
+    </ul>
+    <div class="prose">
+      <p>Next: build the Streamlit upload interface around the frozen model, then the phase-2 restoration model that repairs each detected defect using the same transform functions in reverse.</p>
+    </div>
+  </section>
+
+  <div class="foot">
+    Photo Quality Classifier &mdash; build log. Headline figures are held-out test-set results at threshold 0.5; per-iteration figures and charts are validation. Model frozen at <code>models/traincombo_best.pt</code>, epoch 14.
+  </div>
+
+</div>
+
+<div class="tt" id="tt" role="status" aria-live="polite"></div>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- densitometer step wedge ---------- */
+  var wedge = document.getElementById("wedge");
+  if (wedge) {
+    for (var i = 0; i < 14; i++) {
+      var s = document.createElement("span");
+      s.style.opacity = (0.05 + (i / 13) * 0.82).toFixed(3);
+      wedge.appendChild(s);
+    }
+  }
+
+  /* ---------- tiny chart toolkit (no deps) ---------- */
+  var SVGNS = "http://www.w3.org/2000/svg";
+  var tt = document.getElementById("tt");
+
+  function el(name, attrs) {
+    var n = document.createElementNS(SVGNS, name);
+    for (var k in attrs) n.setAttribute(k, attrs[k]);
+    return n;
+  }
+  function showTip(evt, html) {
+    tt.innerHTML = html;
+    tt.style.opacity = "1";
+    var pad = 14;
+    var x = evt.clientX + pad, y = evt.clientY + pad;
+    var r = tt.getBoundingClientRect();
+    if (x + r.width > window.innerWidth - 8) x = evt.clientX - r.width - pad;
+    if (y + r.height > window.innerHeight - 8) y = evt.clientY - r.height - pad;
+    tt.style.left = x + "px";
+    tt.style.top = y + "px";
+  }
+  function hideTip() { tt.style.opacity = "0"; }
+
+  function makeSVG(host, w, h) {
+    var svg = el("svg", { viewBox: "0 0 " + w + " " + h, role: "img" });
+    host.appendChild(svg);
+    return svg;
+  }
+
+  /* ---------- line chart ---------- */
+  function lineChart(hostId, opt) {
+    var host = document.getElementById(hostId);
+    if (!host) return;
+    var W = 720, H = opt.height || 300;
+    var m = opt.margin || { t: 16, r: 64, b: 40, l: 44 };
+    var svg = makeSVG(host, W, H);
+    var iw = W - m.l - m.r, ih = H - m.t - m.b;
+    var xs = opt.xLabels, n = xs.length;
+    var ymin = opt.yMin, ymax = opt.yMax;
+    var X = function (i) { return m.l + (n === 1 ? iw / 2 : iw * i / (n - 1)); };
+    var Y = function (v) { return m.t + ih * (1 - (v - ymin) / (ymax - ymin)); };
+
+    // y grid + ticks
+    var yticks = opt.yTicks || 4;
+    for (var g = 0; g <= yticks; g++) {
+      var val = ymin + (ymax - ymin) * g / yticks;
+      var yy = Y(val);
+      var gl = el("g", { class: "tick" });
+      gl.appendChild(el("line", { x1: m.l, y1: yy, x2: m.l + iw, y2: yy }));
+      var tx = el("text", { x: m.l - 10, y: yy + 4, "text-anchor": "end", "font-size": "11" });
+      tx.textContent = val.toFixed(2);
+      gl.appendChild(tx);
+      svg.appendChild(gl);
+    }
+    // x labels
+    for (var xi = 0; xi < n; xi++) {
+      var xt = el("text", { x: X(xi), y: m.t + ih + 24, "text-anchor": "middle", "font-size": "11" });
+      xt.textContent = xs[xi];
+      svg.appendChild(xt);
+    }
+    // baseline
+    svg.appendChild(el("line", { class: "axis-line", x1: m.l, y1: m.t + ih, x2: m.l + iw, y2: m.t + ih }));
+
+    opt.series.forEach(function (s) {
+      var d = "";
+      s.data.forEach(function (v, i) { d += (i ? " L" : "M") + X(i) + " " + Y(v); });
+      var path = el("path", { class: "series-line", d: d, stroke: s.color });
+      svg.appendChild(path);
+      s.data.forEach(function (v, i) {
+        var isEnd = i === s.data.length - 1;
+        var c = el("circle", {
+          cx: X(i), cy: Y(v), r: isEnd ? 4.5 : 3.5,
+          fill: s.color, class: isEnd ? "end-dot" : ""
+        });
+        svg.appendChild(c);
+        var hit = el("circle", { cx: X(i), cy: Y(v), r: 16, fill: "transparent", style: "cursor:pointer" });
+        hit.addEventListener("mousemove", function (label, series, val) {
+          return function (e) {
+            showTip(e, "<b>" + series + "</b><br>" + label + ": " + val.toFixed(3));
+          };
+        }(xs[i], s.name, v));
+        hit.addEventListener("mouseleave", hideTip);
+        svg.appendChild(hit);
+      });
+      // end label
+      var lv = s.data[s.data.length - 1];
+      var lab = el("text", {
+        x: X(s.data.length - 1) + 10, y: Y(lv) + 4,
+        "font-size": "11.5", class: "val-label", fill: s.color
+      });
+      lab.textContent = lv.toFixed(s.labDigits || 2);
+      svg.appendChild(lab);
+    });
+  }
+
+  /* ---------- legend builder ---------- */
+  function legend(hostId, items) {
+    var h = document.getElementById(hostId);
+    if (!h) return;
+    items.forEach(function (it) {
+      var s = document.createElement("span");
+      s.innerHTML = '<i style="background:' + it.color + '"></i>' + it.name;
+      h.appendChild(s);
+    });
+  }
+
+  /* ================= chart: trajectory ================= */
+  legend("lg-traj", [
+    { name: "macro-F1 (single-defect)", color: "var(--s1)" },
+    { name: "macro-F1 (multi-defect)", color: "var(--s2)" },
+    { name: "noise F1 (multi-defect)", color: "var(--s3)" }
+  ]);
+  lineChart("chart-traj", {
+    height: 320,
+    xLabels: ["1 · baseline", "2 · crop", "3 · +tuning", "4 · +train combos"],
+    yMin: 0, yMax: 1, yTicks: 5,
+    series: [
+      { name: "macro-F1 (single-defect)", color: "var(--s1)", data: [0.853, 0.845, 0.876, 0.909] },
+      { name: "macro-F1 (multi-defect)", color: "var(--s2)", data: [0.530, 0.520, 0.684, 0.905] },
+      { name: "noise F1 (multi-defect)", color: "var(--s3)", data: [0.071, 0.000, 0.364, 0.875] }
+    ]
+  });
+
+  /* ================= chart: dumbbell ================= */
+  (function () {
+    var host = document.getElementById("chart-dumbbell");
+    if (!host) return;
+    var rows = [
+      { k: "underexposed", a: 0.937, b: 0.966 },
+      { k: "contrast",     a: 0.894, b: 0.915 },
+      { k: "blur",         a: 0.828, b: 0.901 },
+      { k: "overexposed",  a: 0.906, b: 0.879 },
+      { k: "noise",        a: 0.700, b: 0.881 }
+    ];
+    var W = 720, rowH = 46, H = rows.length * rowH + 40;
+    var m = { t: 12, r: 60, b: 28, l: 108 };
+    var iw = W - m.l - m.r;
+    var xmin = 0.65, xmax = 1.0;
+    var X = function (v) { return m.l + iw * (v - xmin) / (xmax - xmin); };
+    var svg = makeSVG(host, W, H);
+
+    for (var gx = 0; gx <= 7; gx++) {
+      var vv = xmin + (xmax - xmin) * gx / 7;
+      var xx = X(vv);
+      var gl = el("g", { class: "tick" });
+      gl.appendChild(el("line", { x1: xx, y1: m.t, x2: xx, y2: m.t + rows.length * rowH }));
+      var tx = el("text", { x: xx, y: m.t + rows.length * rowH + 20, "text-anchor": "middle", "font-size": "10.5" });
+      tx.textContent = vv.toFixed(2);
+      gl.appendChild(tx);
+      svg.appendChild(gl);
+    }
+
+    rows.forEach(function (r, i) {
+      var cy = m.t + i * rowH + rowH / 2;
+      var lab = el("text", { x: m.l - 16, y: cy + 4, "text-anchor": "end", "font-size": "12", fill: "var(--ink)" });
+      lab.textContent = r.k;
+      svg.appendChild(lab);
+
+      svg.appendChild(el("line", {
+        x1: X(Math.min(r.a, r.b)), y1: cy, x2: X(Math.max(r.a, r.b)), y2: cy,
+        stroke: r.b >= r.a ? "var(--good)" : "var(--bad)", "stroke-width": 2, "stroke-linecap": "round"
+      }));
+      svg.appendChild(el("circle", { cx: X(r.a), cy: cy, r: 5, fill: "var(--dot-a)" }));
+      svg.appendChild(el("circle", { cx: X(r.b), cy: cy, r: 5.5, fill: "var(--s1)", class: "end-dot" }));
+
+      var dv = (r.b - r.a >= 0 ? "+" : "") + (r.b - r.a).toFixed(3);
+      var dl = el("text", {
+        x: X(Math.max(r.a, r.b)) + 12, y: cy + 4, "font-size": "11",
+        fill: r.b >= r.a ? "var(--good)" : "var(--bad)"
+      });
+      dl.textContent = dv;
+      svg.appendChild(dl);
+
+      var hit = el("rect", { x: m.l - 4, y: cy - rowH / 2, width: iw + 60, height: rowH, fill: "transparent", style: "cursor:pointer" });
+      hit.addEventListener("mousemove", function (e) {
+        showTip(e, "<b>" + r.k + "</b><br>baseline " + r.a.toFixed(3) + "<br>final&nbsp;&nbsp;&nbsp;&nbsp; " + r.b.toFixed(3) + "<br>&Delta; " + dv);
+      });
+      hit.addEventListener("mouseleave", hideTip);
+      svg.appendChild(hit);
+    });
+  })();
+
+  /* ================= chart: loss small-multiples ================= */
+  (function () {
+    var host = document.getElementById("chart-loss");
+    if (!host) return;
+    var base = {
+      train: [0.312,0.215,0.176,0.158,0.144,0.118,0.115,0.105,0.083,0.071],
+      val:   [0.306,0.264,0.323,0.253,0.248,0.272,0.253,0.224,0.259,0.226]
+    };
+    var fin = {
+      train: [0.381,0.276,0.246,0.209,0.184,0.167,0.144,0.143,0.140,0.129,0.108,0.105,0.098,0.097,0.100],
+      val:   [0.282,0.261,0.223,0.205,0.160,0.141,0.165,0.143,0.128,0.116,0.143,0.149,0.117,0.110,0.133]
+    };
+    var W = 720, H = 260, gap = 44;
+    var pw = (W - gap) / 2;
+    var m = { t: 14, r: 12, b: 34, l: 40 };
+    var svg = makeSVG(host, W, H);
+    var ymax = 0.4;
+
+    function panel(x0, data, title) {
+      var iw = pw - m.l - m.r, ih = H - m.t - m.b;
+      var n = Math.max(data.train.length, data.val.length);
+      var X = function (i) { return x0 + m.l + iw * i / (n - 1); };
+      var Y = function (v) { return m.t + ih * (1 - v / ymax); };
+
+      for (var g = 0; g <= 4; g++) {
+        var val = ymax * g / 4, yy = Y(val);
+        var gl = el("g", { class: "tick" });
+        gl.appendChild(el("line", { x1: x0 + m.l, y1: yy, x2: x0 + m.l + iw, y2: yy }));
+        if (x0 === 0) {
+          var tx = el("text", { x: x0 + m.l - 8, y: yy + 4, "text-anchor": "end", "font-size": "10" });
+          tx.textContent = val.toFixed(1);
+          gl.appendChild(tx);
+        }
+        svg.appendChild(gl);
+      }
+      svg.appendChild(el("line", { class: "axis-line", x1: x0 + m.l, y1: m.t + ih, x2: x0 + m.l + iw, y2: m.t + ih }));
+
+      var t1 = el("text", { x: x0 + m.l, y: H - 8, "font-size": "11", fill: "var(--ink-soft)" });
+      t1.textContent = title;
+      svg.appendChild(t1);
+      var t2 = el("text", { x: x0 + m.l + iw, y: H - 8, "font-size": "10", "text-anchor": "end" });
+      t2.textContent = n + " epochs";
+      svg.appendChild(t2);
+
+      [["train", "var(--s1)"], ["val", "var(--s2)"]].forEach(function (pair) {
+        var arr = data[pair[0]], d = "";
+        arr.forEach(function (v, i) { d += (i ? " L" : "M") + X(i) + " " + Y(v); });
+        svg.appendChild(el("path", { class: "series-line", d: d, stroke: pair[1] }));
+        var le = arr.length - 1;
+        svg.appendChild(el("circle", { cx: X(le), cy: Y(arr[le]), r: 4, fill: pair[1], class: "end-dot" }));
+        arr.forEach(function (v, i) {
+          var hit = el("circle", { cx: X(i), cy: Y(v), r: 12, fill: "transparent", style: "cursor:pointer" });
+          hit.addEventListener("mousemove", function (e) {
+            showTip(e, "<b>" + title + "</b><br>epoch " + (i + 1) + "<br>" + pair[0] + " loss: " + v.toFixed(3));
+          });
+          hit.addEventListener("mouseleave", hideTip);
+          svg.appendChild(hit);
+        });
+      });
+    }
+    panel(0, base, "iteration 1");
+    panel(pw + gap, fin, "iteration 4");
+  })();
+
+})();
+</script>
