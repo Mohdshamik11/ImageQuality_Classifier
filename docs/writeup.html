@@ -897,6 +897,7 @@
     <ul class="list">
       <li><strong>Blown-out highlights.</strong> Pixels clipped to pure white lost their detail at capture. Unrecoverable by anything.</li>
       <li><strong>Perfect deblur.</strong> Deblurring is ill-posed &mdash; many different sharp images produce the same blurry one &mdash; so even Stage&nbsp;3 output is a plausible reconstruction, not the true original.</li>
+      <li><strong>Intentional background blur (portrait bokeh).</strong> Training pairs are always <em>uniformly</em> blurred &rarr; uniformly sharp, so the model never sees &ldquo;soft on purpose&rdquo; as a correct target. Worse, tiled inference scores each 256&times;256 window on its own, so a tile sitting in a blurred background has no way to know a sharp subject exists elsewhere in the frame &mdash; the one piece of context a person would use to call it intentional. The model will likely try to sharpen tasteful shallow-depth-of-field backgrounds. A real fix needs a whole-frame-aware model, which is a different (and heavier, not CPU-friendly) architecture than the tiled approach here. Known and accepted, not addressed in this project.</li>
     </ul>
 
     <div class="note">

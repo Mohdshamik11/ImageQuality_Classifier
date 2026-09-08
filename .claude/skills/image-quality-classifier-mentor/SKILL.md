@@ -143,6 +143,14 @@ over Claude's speed.
     (fastest to professional, but 50–300 MB models, GPU host, abandons the from-scratch premise).
   - **Hard limits no method fixes:** blown-out clipped highlights (data gone at capture);
     perfect deblur (ill-posed).
+  - **Known blind spot (documented, NOT being fixed — user's explicit call 2026-09-05):**
+    can't distinguish intentional portrait bokeh (sharp subject, soft background) from a real
+    blur defect. Training pairs are always uniform-blur→uniform-sharp, so "soft on purpose" is
+    never a valid target; tiling also scores each 256px window alone with no way to know a sharp
+    subject exists elsewhere in frame. Will likely over-sharpen tasteful bokeh. A real fix needs a
+    whole-frame-aware (non-tiled) model — heavier, not CPU-friendly. Do not build a fix unless the
+    user asks; it's documented in README.md, docs/writeup.html section 11, and
+    [[phase2b-restoration-plan]].
 - **Streamlit app (`app.py`, repo root = the Community Cloud main file; built 2026-09-01):**
   multi-upload capped at `MAX_IMAGES = 15` (free-tier RAM; ingest downscales to long side 1400),
   classify-only-new-files with a progress bar, `st.session_state` keyed by `file_id`, 4-per-row
@@ -199,27 +207,30 @@ over Claude's speed.
    precision/recall, whatever is relevant — rather than waiting to be asked. The user has
    explicitly asked for visibility into what needs tuning, not just final numbers.
 
-## Project status (2026-09-01)
+## Project status (updated 2026-09-02)
 
-The classifier and phase 2a are **complete and frozen**. All the earlier open decision points
-have been resolved (per-class thresholds → shipped at 0.5; augmentation → the grain-preserving
-crop; combos in training → 525 added in iteration 4; UI upload resolution → tiled at short-side
-320; UI image cap → `MAX_IMAGES = 15`). See the "Project facts" above for each.
+Phase 1 (classifier) and phase 2a (classical enhancer) are **complete, frozen, and DEPLOYED** —
+live at `imagequalityclassifier.streamlit.app` (Streamlit Community Cloud, public repo
+`github.com/Mohdshamik11/ImageQuality_Classifier`, branch `main`, main file `app.py`, Python 3.11).
+Deploy prep is commit `eb863c3` (`.gitignore` gained `!models/traincombo_best.pt`;
+`requirements.txt` trimmed to app-only with `--extra-index-url https://download.pytorch.org/whl/cpu`
++ `opencv-python-headless`; `requirements-dev.txt` added; `SETUP.md` step 6 → dev file). Redeploys
+on push to `main`. OOM fallback: `MAX_IMAGES` 8 / `INGEST_LONG_SIDE` 1000 in `app.py`.
 
-**DEPLOYED (2026-09-01).** Live at `imagequalityclassifier.streamlit.app` (Streamlit Community
-Cloud, public repo `github.com/Mohdshamik11/ImageQuality_Classifier`, branch `main`, main file
-`app.py`, Python 3.11). Deploy prep committed in `eb863c3`: `.gitignore` gained
-`!models/traincombo_best.pt`; `requirements.txt` trimmed to app-only with
-`--extra-index-url https://download.pytorch.org/whl/cpu` (CPU torch) + `opencv-python-headless`;
-`requirements-dev.txt` added for the full pipeline/notebook deps; `SETUP.md` step 6 now points at
-`requirements-dev.txt`. Build resolved `torch==2.13.0+cpu`, `opencv-python-headless` — both
-pre-empted gotchas landed clean. Redeploys automatically on push to `main`. If it OOMs on the
-free tier during multi-image enhance, drop `MAX_IMAGES` to 8 and `INGEST_LONG_SIDE` to 1000 in
-`app.py` and push.
+Do NOT reopen phase 1 or phase 2a unless the user asks.
 
-The project is **complete**. Do NOT reopen the classifier or start phase 2b (roadmap above)
-unless the user explicitly asks. If the user wants to iterate, the mentor collaboration rules
-below still apply.
+**PHASE 2B IS NOW ACTIVE (started 2026-09-02).** The user has explicitly chosen to build the
+learned restoration model, package the whole thing, and post it. Full locked design is in the
+`[[phase2b-restoration-plan]]` memory. Short version: ONE blind image-to-image regression U-Net
+(residual, ~1–5M params) handling all 5 defects — exposure/contrast folded in, no longer
+classical; classifier stays system-level only (gate + display + self-check), NOT fed to the
+model. Trained on-the-fly on `(realistically-degraded → clean)` pairs from public images
+(COCO + DIV2K/Flickr2K). Loss L1 + SSIM + VGG-perceptual. Metrics PSNR/SSIM/LPIPS + classifier-
+recheck + no-reference on the user's 20 real photos. **Build order: `src/degrade.py` first**
+(the degradation pipeline — everything rides on its realism), then `src/restore_dataset.py`,
+`src/restore_model.py`, `notebooks/05_restoration.ipynb`, then integrate into `enhance.py` +
+redeploy. As of 2026-09-02 nothing is built yet; the user is studying the concept list first
+(also in the phase2b memory). The mentor collaboration rules below apply throughout.
 
 ## Multi-label data schema
 

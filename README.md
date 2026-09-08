@@ -132,6 +132,13 @@ noise and blur are only nudged. The staged plan to fix that:
 **Hard limits no method fixes:** blown-out highlights (the data was clipped at capture), and
 perfect deblurring (it's an ill-posed problem).
 
+**Known blind spot: portrait bokeh.** The restoration model can't distinguish a genuine blur
+defect from intentional shallow depth-of-field (a sharp subject, soft background). Training pairs
+are always uniformly-blurred → uniformly-sharp, so "soft on purpose" is never a valid target; and
+tiled inference scores each 256×256 window on its own, with no way to know a sharp subject exists
+elsewhere in the frame. It will likely try to sharpen tasteful bokeh backgrounds. A real fix needs
+a whole-frame-aware model — heavier, not CPU-friendly — so this is accepted, not addressed.
+
 ---
 
 ## Notes

@@ -18,3 +18,8 @@ requests>=2.31.0
 jupyter>=1.0.0
 ipykernel>=6.25.0
 nbformat>=5.9.0
+
+# phase 2b restoration training + eval only (not needed by the deployed app)
+pytorch-msssim>=1.0.0    # differentiable SSIM for the loss + metric
+lpips>=0.1.4             # LPIPS perceptual metric (reference)
+pyiqa>=0.1.16            # BRISQUE / NIQE / MUSIQ no-reference metrics (pulls timm, transformers)

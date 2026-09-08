@@ -6,6 +6,12 @@ data/raw/*
 data/synthetic/*
 !data/raw/.gitkeep
 !data/synthetic/.gitkeep
+
+# Phase 2b restoration -- large clean-image pool + download scratch (never commit)
+data/clean_pool/
+data/clean_pool_small/
+data/_coco_temp/
+data/_div2k_temp/
 models/*.pt
 !models/traincombo_best.pt
 outputs/*
