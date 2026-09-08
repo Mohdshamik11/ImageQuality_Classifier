@@ -2,11 +2,11 @@
 
 A convolutional neural network, **trained from scratch**, that inspects a photograph and flags
 five kinds of quality defect at once — **blur, underexposure, overexposure, sensor noise, and
-low contrast** — then runs a flag-driven repair on the ones it flags.
+low contrast**, then runs a full restoration on the whole image.
 
 **Live demo:** https://imagequalityclassifier.streamlit.app
 **Full build log:** [`docs/writeup.html`](docs/writeup.html) — data pipeline, four training
-iterations, metrics, and the reasoning behind every decision.
+iterations for the classifier model, metrics, and the reasoning behind every decision.
 
 ---
 
@@ -16,9 +16,7 @@ iterations, metrics, and the reasoning behind every decision.
   so the model has five independent yes/no outputs, not one "pick a class."
 - **Tiled inference.** Uploads are scanned by sliding a 256-pixel window across the whole frame,
   so a defect anywhere in the image is caught (blur is often local; exposure/noise are global).
-- **Flag-driven enhancement.** An "Enhance" button applies only the fixes the classifier flagged
-  — gamma correction for exposure, histogram stretch for contrast, non-local means for noise,
-  unsharp mask for blur. The fix strength scales with the model's confidence.
+- **Enhancement.** A new model that is built on the U-Net architecture to encodes and decodes the image to restore it.
 
 ### Results (held-out test set, threshold 0.5)
 
