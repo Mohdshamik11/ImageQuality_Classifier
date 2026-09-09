@@ -39,23 +39,25 @@ from restore_dataset import build_restore_loaders
 from restore_model import RestoreUNet
 
 # ============================ CONFIG ============================
-# CHANGED FROM THE LAST RUN: model widened 32 -> 48 channels, 2 -> 3 blocks/level.
-# Reason: L1 + SSIM(0.1) was fully STABLE for 28 epochs but plateaued at ~22 dB val
-# PSNR and the sample grids showed almost no denoising/deblurring. Three runs with
-# different losses / learning rates all stall at the same place -> the 1.4M-param
-# 2-level net is the limit, not the loss recipe. This bumps it to ~5M params.
+# RUN HISTORY
+#  - 2-level / 1.4M net, L1+SSIM(0.1): stable but plateaued ~22 dB, images near-identity.
+#  - 48ch / 3-block / 4.3M net, L1+SSIM(0.1), 45 ep: WORKED -- clear denoising + exposure
+#    fixes (val LPIPS 0.36 -> 0.29, SSIM 0.63 -> 0.73). Nothing had plateaued at ep 45.
+# THIS RUN: same 4.3M model, but (a) run longer -- everything was still improving,
+#  (b) turn on perceptual loss at 0.05 -- the term that rewards "looks right" texture,
+#  aimed at the one weak area left (deblur / fine detail, which L1+SSIM won't push).
 BASE_CHANNELS = 48
 N_BLOCKS      = 3
 
 BATCH_SIZE    = 16
-NUM_EPOCHS    = 45
+NUM_EPOCHS    = 70
 LR            = 1e-4
 BETAS         = (0.9, 0.99)
 EPS           = 1e-8            # default; the 1e-4 anti-divergence brake is not needed
 WARMUP_ITERS  = 300            # LinearLR warmup, start at 0.1x LR
 GRAD_CLIP     = 1.0
 
-W_L1, W_SSIM, W_PERC = 1.0, 0.1, 0.0   # perceptual still off -- add after capacity is proven
+W_L1, W_SSIM, W_PERC = 1.0, 0.1, 0.05   # perceptual ON -- first run with all three terms
 
 SEED          = 42
 SAMPLE_EVERY  = 5              # save a [deg|restored|clean] grid every N epochs
@@ -123,6 +125,7 @@ def main():
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     samp_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = ckpt_dir / "restore_best.pt"
+    lpips_path = ckpt_dir / "restore_best_lpips.pt"
     hist_path = ckpt_dir / "restore_history.csv"
 
     loaders = build_restore_loaders(
@@ -139,7 +142,10 @@ def main():
                      if W_SSIM else torch.zeros((), device=pred.device))
         perc = perceptual(pred, target) if W_PERC else torch.zeros((), device=pred.device)
         total = W_L1 * l1 + W_SSIM * ssim_term + W_PERC * perc
-        return total, {"l1": l1.item(), "ssim": float(ssim_term), "perc": float(perc)}
+        # .detach() before scalarising -- these are only for the printed log
+        return total, {"l1": l1.item(),
+                       "ssim": ssim_term.detach().item(),
+                       "perc": perc.detach().item()}
 
     # ---- model / optimiser ----
     model = RestoreUNet(base_channels=BASE_CHANNELS, n_blocks=N_BLOCKS).to(device)
@@ -189,7 +195,8 @@ def main():
 
     # ---- train ----
     history = []
-    best = -1.0
+    best = -1.0                # best (highest) val PSNR
+    best_lpips = float("inf")  # best (lowest) val LPIPS -- tracks perceptual quality
     for epoch in range(1, args.epochs + 1):
         model.train()
         run = {"total": 0.0, "l1": 0.0, "ssim": 0.0, "perc": 0.0}
@@ -224,7 +231,11 @@ def main():
         if vp > best:
             best = vp
             torch.save(model.state_dict(), ckpt_path)
-            flag = "  <- saved"
+            flag += "  <-psnr"
+        if vl < best_lpips:
+            best_lpips = vl
+            torch.save(model.state_dict(), lpips_path)
+            flag += "  <-lpips"
         print(f"epoch {epoch:2d} | loss {run['total']:.4f} "
               f"(l1 {run['l1']:.4f}  ssim {run['ssim']:.4f}  perc {run['perc']:.3f}) | "
               f"val PSNR {vp:5.2f}  SSIM {vs:.3f}  LPIPS {vl:.3f} | {time.time() - t0:4.0f}s{flag}",
@@ -240,7 +251,8 @@ def main():
             save_grid(model, loaders["val"], f"epoch_{epoch:02d}")
 
     save_grid(model, loaders["val"], "final_lastepoch")
-    print(f"\nbest val PSNR {best:.2f} -> {ckpt_path}", flush=True)
+    print(f"\nbest val PSNR  {best:.2f}   -> {ckpt_path}", flush=True)
+    print(f"best val LPIPS {best_lpips:.3f}  -> {lpips_path}", flush=True)
 
 
 if __name__ == "__main__":
