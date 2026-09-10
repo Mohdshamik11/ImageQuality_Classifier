@@ -708,21 +708,22 @@
       <p>Upload up to 15 photos (a RAM cap for a free CPU host; larger uploads are downscaled on ingest). Each is classified once, on arrival, and shown as a card with a <code>2 flagged</code> / <code>clean</code> summary; the five per-class probabilities stay hidden behind a compact expander until the card is opened. An &ldquo;Enhance&rdquo; button then repairs every photo with at least one flag and shows the before/after with a download.</p>
     </div>
 
-    <h3>Enhancement &mdash; a learned restoration model (phase 2b)</h3>
+    <h3>Enhancement &mdash; classical by default, pretrained SOTA opt-in</h3>
+    <div class="note warn">
+      <span class="tag">Where it landed</span>
+      &ldquo;Enhance&rdquo; runs the classical phase-2a fixes. An <em>&ldquo;AI restoration&rdquo;</em> toggle switches to <strong>pretrained Real-ESRGAN</strong> (<code>realesr-general-x4v3</code> loaded via <code>spandrel</code>, <code>src/restore_sota.py</code>) &mdash; inference only. The from-scratch U-Net (next subsection) was trained but not shipped: a regression loss makes it soften detail, and closing that needs adversarial training on far more compute/data than a free tier allows, so the shipped path uses a model the Real-ESRGAN authors already trained that way. Real-ESRGAN denoises and re-crisps edges well on ordinary photos; it does not deblur heavy motion blur and can make blurred faces waxy &mdash; the strength slider blends that back.
+    </div>
+    <h4>The from-scratch model (phase 2b), and why it isn't the default</h4>
     <div class="prose">
-      <p>The &ldquo;Enhance&rdquo; button runs <strong>one blind restoration U-Net</strong> (<code>src/restore_infer.py</code>, weights <code>models/restore_best_lpips.pt</code>). &ldquo;Blind&rdquo; means it takes only the pixels &mdash; no defect flags. The classifier still decides <em>whether</em> to run it (clean photos are skipped) and labels what was targeted, but it no longer steers the repair.</p>
+      <p>It is <strong>one blind restoration U-Net</strong> (<code>src/restore_model.py</code> / <code>src/restore_infer.py</code>, weights <code>models/restore_best_lpips.pt</code>). &ldquo;Blind&rdquo; means it takes only the pixels &mdash; no defect flags.</p>
       <p><strong>Architecture:</strong> a 2-level residual U-Net, 48 base channels, 3 residual blocks per level, ~4.3M parameters. Global residual learning (the net predicts a correction added back to the input, then clamped), PixelShuffle upsampling, no batch normalisation. A full photo is processed by tiling &mdash; the long side is scaled to 768&nbsp;px (near the training scale), a 256 window is slid across it, and the overlaps are blended with a raised-cosine window so there are no seams.</p>
       <p><strong>Training</strong> (<code>src/train_restore.py</code>, run on a Kaggle T4): the target is the real clean image; the input is generated <strong>on the fly</strong> by a Real-ESRGAN-style degradation pipeline (<code>src/degrade.py</code>) &mdash; Gaussian / motion / defocus / anisotropic blur, Poisson&ndash;Gaussian noise, JPEG and resize artifacts, tone and gamma shifts, applied 1&ndash;3 at a time in random order and strength. Nothing is saved to disk; every training pair is fresh. Loss = <code>L1 + 0.1&middot;(1&minus;SSIM) + 0.05&middot;VGG-perceptual</code>. 70 epochs, Adam at 1e-4 with warmup and gradient clipping (three earlier runs diverged before those stabilisers were added).</p>
       <p><strong>Metrics:</strong> PSNR / SSIM / LPIPS against the clean target on a sealed synthetic split, plus no-reference BRISQUE / NIQE / MUSIQ and a classifier re-check (run the classifier on the restored image; the flags should weaken) on a set of 29 real photos.</p>
     </div>
 
     <div class="note">
-      <span class="tag">Real-photo result</span>
-      Across 29 real photos: <strong>BRISQUE 15.9 &rarr; 10.6</strong> (&minus;33%), <strong>MUSIQ 63.2 &rarr; 65.6</strong> (up on 27 of 29), exposure flags down. Denoising and exposure/contrast correction are genuinely useful. <strong>Mild and moderate blur</strong> improves noticeably; <strong>strong motion blur barely moves</strong> &mdash; the regression loss averages over all the sharp images a blurry patch could have come from, and that average is soft. Fixing that needs an adversarial loss (<a href="#roadmap">section&nbsp;11</a>).
-    </div>
-
-    <div class="prose">
-      <p>The original phase-2a <strong>classical</strong> fixes (per-flag gamma / histogram stretch / non-local means / unsharp mask) are kept in <code>src/enhance.py</code> as a fallback that runs only if the restoration checkpoint is missing.</p>
+      <span class="tag">Real-photo eval</span>
+      Across 29 real photos the no-reference metrics improved (<strong>BRISQUE 15.9 &rarr; 10.6</strong>, <strong>MUSIQ 63.2 &rarr; 65.6</strong>) and exposure flags dropped &mdash; but BRISQUE/MUSIQ reward &ldquo;clean and smooth,&rdquo; so a softened image scores <em>better</em> on them even when it looks worse. The lesson: <strong>no-reference metrics can't be the only judge of a restoration model.</strong> Mild/moderate blur genuinely improves; strong motion blur barely moves.
     </div>
   </section>
 

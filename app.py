@@ -1,14 +1,14 @@
 """
-Streamlit UI for the photo-quality classifier + learned restoration.
+Streamlit UI for the photo-quality classifier + enhancement.
 
 Flow:
   1. Upload up to MAX_IMAGES photos.
   2. Each is classified on ingest (tiled -- see src/predict.py) and shown as a
      card. A card's five per-defect scores are hidden until you expand it.
-  3. "Enhance flagged photos" runs the phase-2b restoration U-Net
-     (src/enhance.py -> src/restore_infer.py) on every photo with at least one
-     flagged defect and shows the before/after below. Falls back to the classical
-     fixes if the restoration checkpoint is absent.
+  3. "Enhance" runs the classical, flag-driven fixes (src/enhance.py) on every
+     photo with a flagged defect. An "AI restoration (experimental)" checkbox
+     switches to the learned phase-2b U-Net (src/restore_infer.py) instead --
+     opt-in because it tends to soften detail.
 
 Run locally:  streamlit run app.py
 Deploy:       Streamlit Community Cloud, main file = app.py
@@ -131,21 +131,27 @@ known = [f for f in files if file_key(f) in st.session_state["items"]]
 flagged = [f for f in known
            if any(st.session_state["items"][file_key(f)]["pred"]["flags"].values())]
 
+use_model = st.checkbox(
+    "Try AI restoration (experimental)", value=False,
+    help="Uses a learned model instead of the classical fixes. It corrects exposure "
+         "well but tends to soften detail and flatten contrast, so it is often a net "
+         "loss on photos that aren't badly degraded.",
+)
 enhance_all = st.checkbox(
     "Also enhance photos with no flagged defects", value=False,
-    help="The restoration model can slightly soften or over-sharpen a photo that "
-         "doesn't need work.",
+    help="Only meaningful with AI restoration on; the classical fixes touch only "
+         "flagged defects.",
 )
 strength = st.slider(
     "Enhancement strength", 0.0, 1.0, 0.75, 0.05,
-    help="Lower values blend the result back toward the original, trading some of "
-         "the exposure fix for the original's sharpness and contrast. Re-run after changing.",
+    help="Lower values blend the result back toward the original, trading some of the "
+         "fix for the original's sharpness and contrast. Re-run after changing.",
 )
 
 to_fix = known if enhance_all else flagged
 
 if not to_fix:
-    st.info("No defects flagged. Tick the box above to enhance anyway.")
+    st.info("No defects flagged. Tick 'Also enhance photos with no flagged defects' to run anyway.")
     st.stop()
 
 if st.button(f"Enhance {len(to_fix)} photo(s)", type="primary",
@@ -155,7 +161,7 @@ if st.button(f"Enhance {len(to_fix)} photo(s)", type="primary",
     for i, f in enumerate(to_fix, 1):
         it = st.session_state["items"][file_key(f)]
         out_img, applied = enhance(it["image"], it["pred"]["flags"], it["pred"]["probs"],
-                                   strength=strength)
+                                   strength=strength, use_model=use_model)
         st.session_state["enhanced"][file_key(f)] = {"image": out_img, "applied": applied}
         bar.progress(i / len(to_fix), text=f"Enhancing {it['name']}  ({i}/{len(to_fix)})")
     bar.empty()

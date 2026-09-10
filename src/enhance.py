@@ -1,13 +1,5 @@
 """
-Enhancement: a learned restoration model, with the classical fixes as fallback.
-
-`enhance()` runs the phase-2b restoration U-Net (src/restore_infer.py) on the
-whole image. The model is blind -- it takes only the pixels -- so the classifier
-flags are used only to decide *whether* to enhance (done by the caller) and to
-report what was targeted, not to steer the model.
-
-If the restoration checkpoint is missing, `enhance()` falls back to the original
-phase-2a classical, flag-driven fixes (kept below):
+Enhancement. Default = the classical, flag-driven fixes below:
 
     underexposed / overexposed  (tonal, gamma)
         -> low contrast          (percentile stretch)
@@ -17,6 +9,11 @@ phase-2a classical, flag-driven fixes (kept below):
 Real uploads weren't degraded by our scripts, so every fix is blind: it nudges
 the image toward a clean look, strength scaled by the classifier's confidence.
 
+`enhance(..., use_model=True)` instead runs the phase-2b restoration U-Net
+(src/restore_infer.py). That model corrects exposure well but a regression loss
+makes it soften detail and flatten contrast, so it is an *experimental* opt-in,
+not the default -- see docs/writeup.html section 11.
+
 Usage (smoke test):
     python src/enhance.py path/to/image
 """
@@ -24,7 +21,8 @@ import numpy as np
 import cv2
 from PIL import Image
 
-import restore_infer
+import restore_sota      # pretrained Real-ESRGAN (the "AI restoration" the app offers)
+import restore_infer     # the from-scratch phase-2b U-Net (kept for reference / fallback)
 
 DEFECT_COLUMNS = ["blur", "underexposed", "overexposed", "noise", "contrast"]
 
@@ -110,21 +108,27 @@ def _enhance_classical(image: Image.Image, flags: dict, probs: dict, strength: f
 # --------------------------------------------------------------------------- #
 # public entry point
 # --------------------------------------------------------------------------- #
-def enhance(image: Image.Image, flags: dict, probs: dict, strength: float = 1.0):
-    """image    : PIL image
-       flags    : {defect: bool}  -- from predict(); which defects were detected
-       probs    : {defect: float} -- from predict()
-       strength : 0-1, how much of the enhancement to apply (1 = full, 0 = untouched)
+def enhance(image: Image.Image, flags: dict, probs: dict,
+            strength: float = 1.0, use_model: bool = False):
+    """image     : PIL image
+       flags     : {defect: bool}  -- from predict(); which defects were detected
+       probs     : {defect: float} -- from predict()
+       strength  : 0-1, how much of the enhancement to apply (1 = full, 0 = untouched)
+       use_model : True -> AI restoration. Prefers pretrained Real-ESRGAN
+                   (src/restore_sota.py); falls back to the from-scratch U-Net
+                   (src/restore_infer.py) if those weights are absent. Default
+                   False -> the classical per-flag fixes.
 
     Returns (enhanced PIL image, list of labels describing what was done).
-    Uses the learned restoration model; falls back to the classical fixes if the
-    checkpoint is not present.
     """
     flagged = [c for c in DEFECT_COLUMNS if flags.get(c)]
+    targets = ([f"targets: {', '.join(flagged)}"] if flagged else [])
 
-    if restore_infer.available():
-        out = restore_infer.restore_image(image, strength=strength)
-        return out, ["learned restoration"] + ([f"targets: {', '.join(flagged)}"] if flagged else [])
+    if use_model and restore_sota.available():
+        return restore_sota.restore_image(image, strength=strength), ["AI restoration (Real-ESRGAN)"] + targets
+
+    if use_model and restore_infer.available():
+        return restore_infer.restore_image(image, strength=strength), ["AI restoration (from-scratch U-Net)"] + targets
 
     return _enhance_classical(image, flags, probs, strength=strength)
 

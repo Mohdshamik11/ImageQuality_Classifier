@@ -116,12 +116,22 @@ over Claude's speed.
   `underexposed → overexposed → contrast → noise → blur`, strength `clip((prob-0.5)/0.5,0,1)`,
   tonal fixes on LAB L only. Techniques: gamma (exposure), percentile stretch (contrast),
   `cv2.fastNlMeansDenoisingColored` (noise), unsharp mask (blur).
-- **Phase 2b enhancement (BUILT & SHIPPED 2026-09-10) — learned blind restoration U-Net.**
-  `enhance(PIL, flags, probs)` now calls `src/restore_infer.py` → one blind ~4.3M-param residual
-  U-Net (`src/restore_model.py`, `RestoreUNet(base_channels=48, n_blocks=3)`), weights
-  `models/restore_best_lpips.pt` (whitelisted in `.gitignore`, ships with the repo). Blind = takes
-  only pixels; classifier decides only WHETHER to run it + labels what was targeted. Full-photo
-  inference is tiled (256 window, stride 192, raised-cosine blend), long side capped at 768.
+- **Enhancement — final design (2026-09-11).** `enhance(PIL, flags, probs, strength=1.0, use_model=False)`:
+  - `use_model=False` (DEFAULT, app "Enhance" button) → classical per-flag fixes.
+  - `use_model=True` (app "AI restoration" checkbox, off by default) → **pretrained Real-ESRGAN**
+    `realesr-general-x4v3` (~5MB, `models/realesr-general-x4v3.pth`, whitelisted) loaded via
+    **`spandrel`** (`src/restore_sota.py`) — no `basicsr`. It's an x4 SR model used as a restorer:
+    input capped 512 long side → x4 forward (~1.5s CPU) → clamp → downscale to ≤1400. Falls back
+    to the from-scratch U-Net then classical if weights absent.
+  - `strength` 0–1 blends output↔a plain resize of the input (both AI paths + classical).
+  - `requirements.txt` gained `spandrel` (pulls only `einops` + `safetensors` new — free-tier fine).
+- **From-scratch phase-2b U-Net (BUILT, evaluated, NOT shipped) — `src/restore_model.py` /
+  `restore_infer.py`, weights `models/restore_best_lpips.pt`.** Kept in the repo as the documented
+  training exercise. On real photos it corrects exposure but **softens detail + flattens contrast**
+  (regression-loss artifact — L1/SSIM/perceptual pick the average of all plausible sharp patches).
+  No-ref eval metrics (BRISQUE/MUSIQ) missed it because they reward smoothness; the user (a
+  photographer) caught it by eye. Fixing it = adversarial (GAN) loss 2nd stage + more data/compute
+  than a free tier / single Kaggle T4 allows → chose pretrained SOTA inference instead.
   - **Training (`src/train_restore.py`, run on a Kaggle T4 via `notebooks/kaggle_train.ipynb`):**
     target = real clean image; input generated ON THE FLY by `src/degrade.py` (Real-ESRGAN-style:
     Gaussian/motion/defocus/anisotropic blur, Poisson-Gaussian noise, JPEG + resize artifacts,
@@ -204,12 +214,14 @@ over Claude's speed.
 branch `main`, main file `app.py`, Python 3.11; redeploys on push to `main`).
 
 - **Phase 1 — classifier:** frozen, `models/traincombo_best.pt`. See fact above + [[baseline-model-spec]].
-- **Phase 2a — classical enhancer:** now the fallback inside `enhance.py`.
-- **Phase 2b — learned restoration U-Net:** shipped, `models/restore_best_lpips.pt`. See fact
+- **Enhancement:** classical fixes are the default "Enhance"; **pretrained Real-ESRGAN** is the
+  "AI restoration" opt-in (2026-09-11 — option A of the "industry-level" discussion). The
+  from-scratch U-Net is kept as a documented exercise, not shipped. See the two enhancement facts
   above + [[phase2b-restoration-plan]].
 
-Do NOT reopen any phase unless the user asks. The one genuinely open item is the **GAN-loss
-iteration for strong deblur** — scoped in the phase-2b fact, NOT started, only on request.
+Do NOT reopen any phase unless the user asks. Possible future work the user has floated:
+(a) the GAN 2nd-stage retrain of the from-scratch U-Net; (b) move to HuggingFace Spaces free-GPU
+("option B") for bigger Real-ESRGAN + GFPGAN/CodeFormer face routing. Neither started.
 
 `requirements.txt` (app-only, CPU torch) needs no changes for phase 2b — `restore_infer.py` uses
 only torch/numpy/PIL. The eval-only deps (`pyiqa`, `lpips`, `pytorch-msssim`) are in

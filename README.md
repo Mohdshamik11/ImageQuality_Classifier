@@ -16,10 +16,13 @@ four training iterations, the learned restoration model, metrics, and the reason
   so the model has five independent yes/no outputs, not one "pick a class."
 - **Tiled inference.** Uploads are scanned by sliding a 256-pixel window across the whole frame,
   so a defect anywhere in the image is caught (blur is often local; exposure/noise are global).
-- **Learned restoration (phase 2b).** The "Enhance" button runs a blind ~4.3M-parameter residual
-  U-Net trained on a realistic on-the-fly degradation pipeline. It denoises, corrects exposure and
-  contrast, and improves mild-to-moderate blur. Strong motion blur is the hard case. The classical
-  per-flag fixes (phase 2a) remain as a fallback.
+- **Enhancement.** "Enhance" runs classical, flag-driven fixes by default (gamma, percentile
+  stretch, non-local means, unsharp mask), scaled by the classifier's confidence. An
+  *"AI restoration"* toggle switches to **pretrained Real-ESRGAN** (`realesr-general-x4v3` via
+  `spandrel`) — inference only, no training. We *did* train a restoration U-Net from scratch
+  (phase 2b, below); it softens detail, and closing that gap needs adversarial training on far
+  more data/compute than a free tier allows — so the shipped option uses a model the Real-ESRGAN
+  authors already trained that way.
 
 ### Results (held-out test set, threshold 0.5)
 
@@ -135,7 +138,7 @@ src/
   train_restore.py          restoration training loop (config block at top)
   restore_infer.py          tiled restoration inference
   eval_restore.py           real-photo eval: before/after + no-ref metrics + classifier re-check
-  enhance.py                learned restoration, with the classical per-flag fixes as fallback
+  enhance.py                classical per-flag fixes (default) + AI-restoration opt-in
 notebooks/
   01_baseline … 04_train_combos   the classifier's four iterations
   kaggle_train.ipynb              thin wrapper to run train_restore.py on a Kaggle GPU
@@ -146,28 +149,32 @@ models/restore_best_lpips.pt      the restoration model
 
 ---
 
-## Results — restoration model
+## The from-scratch restoration model (phase 2b) — why it isn't the shipped one
 
-On a 29-photo real-world test set (`src/eval_restore.py`):
+A ~4.3M-param residual U-Net was trained from scratch on an on-the-fly realistic degradation
+pipeline (`src/train_restore.py`, `src/degrade.py`, run on a Kaggle T4). On a 29-photo real-world
+test set the no-reference metrics improved (BRISQUE 15.9 → 10.6, MUSIQ 63.2 → 65.6) — but those
+metrics reward "smooth and artifact-free," which **hid a real regression: the model softens detail
+and flattens contrast.** A photographer's eye catches it immediately on any photo that isn't badly
+degraded.
 
-- **BRISQUE 15.9 → 10.6** (−33%, lower is better) · **MUSIQ 63.2 → 65.6** (up on 27 of 29)
-- Denoising and exposure/contrast correction are genuinely useful; overexposure flags drop.
-- **Mild-to-moderate blur** improves noticeably.
-- **Strong motion blur barely moves** — see below.
+That's inherent to the loss. L1 / SSIM / perceptual are *regression* losses: given a degraded
+patch that could map to many clean patches, the loss-minimising output is their (soft, low-contrast)
+average. More epochs, channels, or data don't move that ceiling — the fix is an **adversarial
+(GAN) loss**, usually a second training stage on an L1-pretrained model, plus a lot more data.
+That's a multi-week GPU effort, so the shipped "AI restoration" uses **Real-ESRGAN** —
+a model its authors *did* train that way. `models/restore_best_lpips.pt` and the training code
+stay in the repo as the documented exercise.
 
-## Known limits & what's next
+## Known limits (both models)
 
-- **Strong motion blur.** L1 / SSIM / perceptual are regression losses: when a blurry patch could
-  have come from many sharp patches, the loss-minimising output is their (soft) average. More
-  epochs or channels don't change that ceiling. The fix is an **adversarial (GAN) loss** — a
-  discriminator that penalises "looks blurry" directly — plus rebalancing `degrade.py` toward the
-  recoverable blur range. That's the next training iteration.
-- **Blown-out highlights** are unrecoverable (detail was clipped at capture).
-- **Portrait bokeh.** The model can't tell intentional shallow depth-of-field from a blur defect —
-  training pairs are always uniformly blurred → uniformly sharp, and tiled inference sees each
-  256×256 window alone with no view of a sharp subject elsewhere. It may over-sharpen tasteful
-  bokeh backgrounds. A fix needs a whole-frame-aware model; accepted, not addressed.
-- **Output is capped at 768 px** long side for CPU speed on the free host.
+- **Strong motion blur** can't be recovered — the information is gone at capture. Real-ESRGAN
+  denoises and re-crisps edges but doesn't deblur; it can also make heavily-blurred faces look
+  slightly waxy. Use a lower **Enhancement strength** to pull that back.
+- **Blown-out highlights** are unrecoverable.
+- **Faces** are a bit hit-or-miss — a dedicated face model (GFPGAN / CodeFormer) would fix that
+  but needs a GPU host.
+- Real-ESRGAN input is capped at 512 px (CPU speed); output is scaled to ≤1400 px.
 
 ---
 
