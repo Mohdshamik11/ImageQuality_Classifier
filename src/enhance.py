@@ -89,6 +89,31 @@ _FIXES = [
     ("blur", fix_blur),
 ]
 
+# The AI restoration model handles noise/detail but not tone, so the AI path runs
+# just these tonal fixes first.
+_TONAL = {"underexposed", "overexposed", "contrast"}
+
+
+def _enhance_tonal(image: Image.Image, flags: dict, probs: dict):
+    """Run only the flagged tonal fixes (exposure / contrast). Returns (PIL, [names])."""
+    rgb = np.array(image.convert("RGB"))
+    done = []
+    for name, fn in _FIXES:
+        if name in _TONAL and flags.get(name):
+            rgb = fn(rgb, strength_from_prob(probs.get(name, 1.0)))
+            done.append(name)
+    return Image.fromarray(rgb), done
+
+
+def _blend_to_original(original: Image.Image, result: Image.Image, strength: float) -> Image.Image:
+    """result <- strength -> a plain resize of the original, at result's size."""
+    strength = float(min(1.0, max(0.0, strength)))
+    if strength >= 1.0:
+        return result
+    base = np.asarray(original.convert("RGB").resize(result.size, Image.LANCZOS), np.float32)
+    a = np.asarray(result, np.float32)
+    return Image.fromarray((strength * a + (1.0 - strength) * base).round().clip(0, 255).astype(np.uint8))
+
 
 def _enhance_classical(image: Image.Image, flags: dict, probs: dict, strength: float = 1.0):
     src = np.array(image.convert("RGB"))
@@ -120,15 +145,25 @@ def enhance(image: Image.Image, flags: dict, probs: dict,
                    False -> the classical per-flag fixes.
 
     Returns (enhanced PIL image, list of labels describing what was done).
+
+    AI path order: classical tonal fixes (exposure / contrast) first -- the model
+    doesn't correct tone -- then the restoration model for noise / detail, then a
+    `strength` blend back toward the original.
     """
     flagged = [c for c in DEFECT_COLUMNS if flags.get(c)]
     targets = ([f"targets: {', '.join(flagged)}"] if flagged else [])
 
-    if use_model and restore_sota.available():
-        return restore_sota.restore_image(image, strength=strength), ["AI restoration (Real-ESRGAN)"] + targets
-
-    if use_model and restore_infer.available():
-        return restore_infer.restore_image(image, strength=strength), ["AI restoration (from-scratch U-Net)"] + targets
+    if use_model and (restore_sota.available() or restore_infer.available()):
+        toned, tonal = _enhance_tonal(image, flags, probs)
+        if restore_sota.available():
+            restored = restore_sota.restore_image(toned, strength=1.0)
+            model_label = "AI restoration (Real-ESRGAN)"
+        else:
+            restored = restore_infer.restore_image(toned, strength=1.0)
+            model_label = "AI restoration (from-scratch U-Net)"
+        out = _blend_to_original(image, restored, strength)
+        label = [model_label] + ([f"+ {', '.join(tonal)}"] if tonal else []) + targets
+        return out, label
 
     return _enhance_classical(image, flags, probs, strength=strength)
 
