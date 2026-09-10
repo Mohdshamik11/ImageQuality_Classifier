@@ -92,23 +92,29 @@ _FIXES = [
 ]
 
 
-def _enhance_classical(image: Image.Image, flags: dict, probs: dict):
-    rgb = np.array(image.convert("RGB"))
+def _enhance_classical(image: Image.Image, flags: dict, probs: dict, strength: float = 1.0):
+    src = np.array(image.convert("RGB"))
+    rgb = src.copy()
     applied = []
     for name, fn in _FIXES:
         if flags.get(name):
             rgb = fn(rgb, strength_from_prob(probs.get(name, 1.0)))
             applied.append(name)
+    s = float(min(1.0, max(0.0, strength)))
+    if s < 1.0:                                   # blend the whole result back toward the input
+        rgb = (s * rgb.astype(np.float32) + (1.0 - s) * src.astype(np.float32))
+        rgb = rgb.round().clip(0, 255).astype(np.uint8)
     return Image.fromarray(rgb), applied
 
 
 # --------------------------------------------------------------------------- #
 # public entry point
 # --------------------------------------------------------------------------- #
-def enhance(image: Image.Image, flags: dict, probs: dict):
-    """image : PIL image
-       flags : {defect: bool}  -- from predict(); which defects were detected
-       probs : {defect: float} -- from predict()
+def enhance(image: Image.Image, flags: dict, probs: dict, strength: float = 1.0):
+    """image    : PIL image
+       flags    : {defect: bool}  -- from predict(); which defects were detected
+       probs    : {defect: float} -- from predict()
+       strength : 0-1, how much of the enhancement to apply (1 = full, 0 = untouched)
 
     Returns (enhanced PIL image, list of labels describing what was done).
     Uses the learned restoration model; falls back to the classical fixes if the
@@ -117,10 +123,10 @@ def enhance(image: Image.Image, flags: dict, probs: dict):
     flagged = [c for c in DEFECT_COLUMNS if flags.get(c)]
 
     if restore_infer.available():
-        out = restore_infer.restore_image(image)
+        out = restore_infer.restore_image(image, strength=strength)
         return out, ["learned restoration"] + ([f"targets: {', '.join(flagged)}"] if flagged else [])
 
-    return _enhance_classical(image, flags, probs)
+    return _enhance_classical(image, flags, probs, strength=strength)
 
 
 if __name__ == "__main__":

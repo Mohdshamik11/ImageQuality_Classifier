@@ -126,21 +126,36 @@ for start in range(0, len(items), PER_ROW):
 
 # ---- enhance ----------------------------------------------------------- #
 st.divider()
-to_fix = [f for f in files
-          if file_key(f) in st.session_state["items"]
-          and any(st.session_state["items"][file_key(f)]["pred"]["flags"].values())]
+
+known = [f for f in files if file_key(f) in st.session_state["items"]]
+flagged = [f for f in known
+           if any(st.session_state["items"][file_key(f)]["pred"]["flags"].values())]
+
+enhance_all = st.checkbox(
+    "Also enhance photos with no flagged defects", value=False,
+    help="The restoration model can slightly soften or over-sharpen a photo that "
+         "doesn't need work.",
+)
+strength = st.slider(
+    "Enhancement strength", 0.0, 1.0, 0.75, 0.05,
+    help="Lower values blend the result back toward the original, trading some of "
+         "the exposure fix for the original's sharpness and contrast. Re-run after changing.",
+)
+
+to_fix = known if enhance_all else flagged
 
 if not to_fix:
-    st.info("No defects flagged, so there is nothing to enhance.")
+    st.info("No defects flagged. Tick the box above to enhance anyway.")
     st.stop()
 
-if st.button(f"Enhance {len(to_fix)} flagged photo(s)", type="primary",
+if st.button(f"Enhance {len(to_fix)} photo(s)", type="primary",
              icon=":material/auto_fix_high:"):
     st.session_state["enhanced"] = {}
     bar = st.progress(0.0, text="Enhancing...")
     for i, f in enumerate(to_fix, 1):
         it = st.session_state["items"][file_key(f)]
-        out_img, applied = enhance(it["image"], it["pred"]["flags"], it["pred"]["probs"])
+        out_img, applied = enhance(it["image"], it["pred"]["flags"], it["pred"]["probs"],
+                                   strength=strength)
         st.session_state["enhanced"][file_key(f)] = {"image": out_img, "applied": applied}
         bar.progress(i / len(to_fix), text=f"Enhancing {it['name']}  ({i}/{len(to_fix)})")
     bar.empty()

@@ -83,8 +83,14 @@ def restore_tensor(model, img_t: torch.Tensor, device: str,
     return restored[:, : h - pad_h, : w - pad_w].cpu()
 
 
-def restore_image(image: Image.Image, max_long_side: int = MAX_LONG_SIDE) -> Image.Image:
-    """PIL photo (any size) -> restored PIL photo (long side <= max_long_side)."""
+def restore_image(image: Image.Image, max_long_side: int = MAX_LONG_SIDE,
+                  strength: float = 1.0) -> Image.Image:
+    """PIL photo (any size) -> restored PIL photo (long side <= max_long_side).
+
+    strength in [0, 1] blends the model output with the (downscaled) input:
+    1.0 = full model, 0.0 = untouched. Lower values trade some of the exposure
+    fix back for the input's original sharpness and contrast.
+    """
     img = image.convert("RGB")
     if max_long_side and max(img.size) > max_long_side:
         s = max_long_side / max(img.size)
@@ -92,11 +98,14 @@ def restore_image(image: Image.Image, max_long_side: int = MAX_LONG_SIDE) -> Ima
     w, h = img.size
     img = img.crop((0, 0, w - w % 4, h - h % 4))   # U-Net needs H, W divisible by 4
 
+    src = np.asarray(img, np.float32) / 255.0
     model, device = load_restore_model()
-    t = torch.from_numpy(np.asarray(img, np.float32) / 255.0).permute(2, 0, 1)
-    out = restore_tensor(model, t, device)
-    arr = (out.permute(1, 2, 0).numpy() * 255).round().astype(np.uint8)
-    return Image.fromarray(arr)
+    out = restore_tensor(model, torch.from_numpy(src).permute(2, 0, 1), device)
+    out = out.permute(1, 2, 0).numpy()
+
+    strength = float(min(1.0, max(0.0, strength)))
+    blended = strength * out + (1.0 - strength) * src
+    return Image.fromarray((blended * 255).round().clip(0, 255).astype(np.uint8))
 
 
 if __name__ == "__main__":
