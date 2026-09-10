@@ -14,7 +14,7 @@ That's all you need. No other extensions are required for this project.
 
 ## 2. Open the project folder
 
-Open this `photo-quality-classifier/` folder in VS Code: `File > Open Folder...`
+Open this `imageQuality_Classifier/` folder in VS Code: `File > Open Folder...`
 
 ## 3. Install Miniconda (if you don't have conda already)
 
@@ -30,13 +30,13 @@ conda --version
 Open a terminal in VS Code (`` Ctrl+` ``) and run:
 
 ```bash
-conda create -n photo-quality-classifier python=3.11
-conda activate photo-quality-classifier
+conda create -n imageQuality_Classifier python=3.11
+conda activate imageQuality_Classifier
 ```
 
-You'll know it worked if you see `(photo-quality-classifier)` at the start of your terminal prompt.
+You'll know it worked if you see `(imageQuality_Classifier)` at the start of your terminal prompt.
 
-**Important:** every time you open a new terminal in VS Code for this project, re-run `conda activate photo-quality-classifier`.
+**Important:** every time you open a new terminal in VS Code for this project, re-run `conda activate imageQuality_Classifier`.
 
 **If you have an NVIDIA GPU** and want CUDA support, install PyTorch through conda first, before the pip install below:
 ```bash
@@ -45,7 +45,7 @@ conda install pytorch torchvision pytorch-cuda=12.1 -c pytorch -c nvidia
 
 ## 5. Select the conda environment as your Python interpreter
 
-Press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac) → type "Python: Select Interpreter" → choose the one labeled `photo-quality-classifier (conda)`. This makes sure both your terminal and any notebooks use the same environment.
+Press `Ctrl+Shift+P` (`Cmd+Shift+P` on Mac) → type "Python: Select Interpreter" → choose the one labeled `imageQuality_Classifier (conda)`. This makes sure both your terminal and any notebooks use the same environment.
 
 ## 6. Install dependencies
 

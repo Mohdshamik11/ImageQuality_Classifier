@@ -1,21 +1,21 @@
 """
-Phase 2a: classical, flag-driven image enhancement.
+Enhancement: a learned restoration model, with the classical fixes as fallback.
 
-Each defect the classifier flags has one fix function. `enhance()` runs only the
-flagged fixes, in an order chosen so earlier steps don't sabotage later ones:
+`enhance()` runs the phase-2b restoration U-Net (src/restore_infer.py) on the
+whole image. The model is blind -- it takes only the pixels -- so the classifier
+flags are used only to decide *whether* to enhance (done by the caller) and to
+report what was targeted, not to steer the model.
 
-    underexposed / overexposed  (tonal)
-        -> low contrast          (tonal)
-            -> noise             (denoise BEFORE sharpening)
-                -> blur          (sharpen last -- it amplifies noise)
+If the restoration checkpoint is missing, `enhance()` falls back to the original
+phase-2a classical, flag-driven fixes (kept below):
 
-All fixes are BLIND: real uploads weren't degraded by our scripts, so we can't
-undo a known factor. Each fix nudges the image toward a well-exposed / clean look,
-and its strength scales with the classifier's confidence (a borderline 0.5
-detection barely touches the image; a 0.95 detection gets the full moderate fix).
+    underexposed / overexposed  (tonal, gamma)
+        -> low contrast          (percentile stretch)
+            -> noise             (non-local means, before sharpening)
+                -> blur          (unsharp mask, last -- it amplifies noise)
 
-Tonal fixes (brightness, contrast) are done on the L channel of LAB only, so they
-don't shift the photo's colours.
+Real uploads weren't degraded by our scripts, so every fix is blind: it nudges
+the image toward a clean look, strength scaled by the classifier's confidence.
 
 Usage (smoke test):
     python src/enhance.py path/to/image
@@ -24,22 +24,22 @@ import numpy as np
 import cv2
 from PIL import Image
 
+import restore_infer
+
 DEFECT_COLUMNS = ["blur", "underexposed", "overexposed", "noise", "contrast"]
 
 
 # --------------------------------------------------------------------------- #
-# helpers
+# classical fallback -- helpers
 # --------------------------------------------------------------------------- #
 def strength_from_prob(p: float) -> float:
-    """Map a probability in [0.5, 1.0] onto a fix strength in [0.0, 1.0].
-    A detection right at the 0.5 threshold -> ~0 strength (near no-op);
-    a confident 1.0 detection -> full (moderate) strength."""
+    """Probability in [0.5, 1.0] -> fix strength in [0.0, 1.0]. A detection at the
+    0.5 threshold is a near no-op; a confident 1.0 gets the full moderate fix."""
     return float(max(0.0, min(1.0, (p - 0.5) / 0.5)))
 
 
 def _on_luminance(rgb: np.ndarray, fn) -> np.ndarray:
-    """Apply `fn` to the lightness channel only, via LAB, so colours are untouched.
-    cv2's LAB L channel is 0-255 for an 8-bit image."""
+    """Apply `fn` to the LAB L channel only, so colours are untouched."""
     lab = cv2.cvtColor(rgb, cv2.COLOR_RGB2LAB)
     L = lab[:, :, 0].astype(np.float32)
     lab[:, :, 0] = np.clip(fn(L), 0, 255).astype(np.uint8)
@@ -47,59 +47,42 @@ def _on_luminance(rgb: np.ndarray, fn) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- #
-# per-defect fixes  (rgb uint8 in, rgb uint8 out)
+# classical fallback -- per-defect fixes (rgb uint8 in/out)
 # --------------------------------------------------------------------------- #
-def fix_underexposed(rgb: np.ndarray, strength: float) -> np.ndarray:
-    """Gamma correction with gamma < 1: lifts the midtones and shadows while
-    leaving the highlights roughly in place. Moderate: gamma 1.0 -> 0.6."""
-    gamma = 1.0 - 0.4 * strength
+def fix_underexposed(rgb, strength):
+    gamma = 1.0 - 0.4 * strength                      # lift midtones/shadows
     return _on_luminance(rgb, lambda L: 255.0 * (L / 255.0) ** gamma)
 
 
-def fix_overexposed(rgb: np.ndarray, strength: float) -> np.ndarray:
-    """Gamma > 1: pulls the bright end down. Pixels already clipped to pure white
-    stay there -- that detail is gone -- but everything below recovers. Moderate:
-    gamma 1.0 -> 1.5."""
-    gamma = 1.0 + 0.5 * strength
+def fix_overexposed(rgb, strength):
+    gamma = 1.0 + 0.5 * strength                      # pull the bright end down
     return _on_luminance(rgb, lambda L: 255.0 * (L / 255.0) ** gamma)
 
 
-def fix_low_contrast(rgb: np.ndarray, strength: float) -> np.ndarray:
-    """Percentile stretch: find where the darkest 1% and brightest 1% of pixels
-    sit, and remap that range to the full 0-255. Blended with the original by
-    `strength` so a borderline case is barely changed."""
+def fix_low_contrast(rgb, strength):
     def stretch(L):
         lo, hi = np.percentile(L, 1.0), np.percentile(L, 99.0)
-        if hi - lo < 1e-3:                      # near-flat image, nothing to stretch
+        if hi - lo < 1e-3:
             return L
         stretched = np.clip((L - lo) / (hi - lo) * 255.0, 0.0, 255.0)
         return L * (1.0 - strength) + stretched * strength
     return _on_luminance(rgb, stretch)
 
 
-def fix_noise(rgb: np.ndarray, strength: float) -> np.ndarray:
-    """Non-local means: for each patch, find similar-looking patches elsewhere in
-    the image and average them -- random noise cancels, real structure survives.
-    `h` is the filter strength; scales 3 -> 12 with confidence. Runs in BGR, which
-    is what this OpenCV routine expects."""
-    h = 3.0 + 9.0 * strength
+def fix_noise(rgb, strength):
+    h = 3.0 + 9.0 * strength                          # non-local means filter strength
     bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
     den = cv2.fastNlMeansDenoisingColored(bgr, None, h, h, 7, 21)
     return cv2.cvtColor(den, cv2.COLOR_BGR2RGB)
 
 
-def fix_blur(rgb: np.ndarray, strength: float) -> np.ndarray:
-    """Unsharp mask: subtract a blurred copy from the original to isolate the
-    edges, then add them back amplified. Re-crisps edges; it is not true deblur,
-    and it would amplify noise, which is why it runs after denoising. Moderate:
-    amount 0 -> 0.8."""
-    amount = 0.8 * strength
+def fix_blur(rgb, strength):
+    amount = 0.8 * strength                           # unsharp mask -- not true deblur
     blurred = cv2.GaussianBlur(rgb, (0, 0), 2.0).astype(np.float32)
     sharp = rgb.astype(np.float32) * (1.0 + amount) - blurred * amount
     return np.clip(sharp, 0, 255).astype(np.uint8)
 
 
-# order matters -- see module docstring
 _FIXES = [
     ("underexposed", fix_underexposed),
     ("overexposed", fix_overexposed),
@@ -109,15 +92,7 @@ _FIXES = [
 ]
 
 
-def enhance(image: Image.Image, flags: dict, probs: dict):
-    """Run every flagged fix in order.
-
-    image  : PIL image
-    flags  : {defect: bool}   -- from predict()
-    probs  : {defect: float}  -- from predict(); sets each fix's strength
-
-    Returns (enhanced PIL image, list of fixes applied).
-    """
+def _enhance_classical(image: Image.Image, flags: dict, probs: dict):
     rgb = np.array(image.convert("RGB"))
     applied = []
     for name, fn in _FIXES:
@@ -127,24 +102,40 @@ def enhance(image: Image.Image, flags: dict, probs: dict):
     return Image.fromarray(rgb), applied
 
 
+# --------------------------------------------------------------------------- #
+# public entry point
+# --------------------------------------------------------------------------- #
+def enhance(image: Image.Image, flags: dict, probs: dict):
+    """image : PIL image
+       flags : {defect: bool}  -- from predict(); which defects were detected
+       probs : {defect: float} -- from predict()
+
+    Returns (enhanced PIL image, list of labels describing what was done).
+    Uses the learned restoration model; falls back to the classical fixes if the
+    checkpoint is not present.
+    """
+    flagged = [c for c in DEFECT_COLUMNS if flags.get(c)]
+
+    if restore_infer.available():
+        out = restore_infer.restore_image(image)
+        return out, ["learned restoration"] + ([f"targets: {', '.join(flagged)}"] if flagged else [])
+
+    return _enhance_classical(image, flags, probs)
+
+
 if __name__ == "__main__":
     import sys
     from predict import predict
 
     path = sys.argv[1]
     im = Image.open(path).convert("RGB")
-    out = predict(im)
-
-    def mean_luma(pil):
-        L = cv2.cvtColor(np.array(pil), cv2.COLOR_RGB2LAB)[:, :, 0]
-        return L.mean()
-
-    enhanced, applied = enhance(im, out["flags"], out["probs"])
+    pred = predict(im)
+    enhanced, applied = enhance(im, pred["flags"], pred["probs"])
     save_to = path.rsplit(".", 1)[0] + "_enhanced.png"
     enhanced.save(save_to)
 
-    print(f"{path}")
-    print(f"  flagged : {[c for c in DEFECT_COLUMNS if out['flags'][c]] or 'none'}")
-    print(f"  applied : {applied or 'none'}")
-    print(f"  mean luminance {mean_luma(im):.1f} -> {mean_luma(enhanced):.1f}")
+    print(f"{path}  {im.size} -> {enhanced.size}")
+    print(f"  flagged : {[c for c in DEFECT_COLUMNS if pred['flags'][c]] or 'none'}")
+    print(f"  applied : {applied}")
+    print(f"  restoration model present: {restore_infer.available()}")
     print(f"  wrote {save_to}")

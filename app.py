@@ -1,13 +1,14 @@
 """
-Streamlit UI for the photo-quality classifier + phase-2a enhancement.
+Streamlit UI for the photo-quality classifier + learned restoration.
 
 Flow:
   1. Upload up to MAX_IMAGES photos.
   2. Each is classified on ingest (tiled -- see src/predict.py) and shown as a
      card. A card's five per-defect scores are hidden until you expand it.
-  3. "Enhance flagged photos" runs the classical, flag-driven fixes
-     (src/enhance.py) on every photo with at least one flagged defect and shows
-     the before/after below.
+  3. "Enhance flagged photos" runs the phase-2b restoration U-Net
+     (src/enhance.py -> src/restore_infer.py) on every photo with at least one
+     flagged defect and shows the before/after below. Falls back to the classical
+     fixes if the restoration checkpoint is absent.
 
 Run locally:  streamlit run app.py
 Deploy:       Streamlit Community Cloud, main file = app.py
@@ -152,7 +153,7 @@ if st.session_state["enhanced"]:
         if not enh:
             continue
         it = st.session_state["items"][file_key(f)]
-        st.markdown(f"**{it['name']}** &nbsp; fixed: {', '.join(enh['applied'])}")
+        st.markdown(f"**{it['name']}** &nbsp; {', '.join(enh['applied'])}")
         a, b = st.columns(2, gap="medium")
         a.image(it["image"], caption="original", width="stretch")
         b.image(enh["image"], caption="enhanced", width="stretch")

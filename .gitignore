@@ -14,6 +14,7 @@ data/_coco_temp/
 data/_div2k_temp/
 models/*.pt
 !models/traincombo_best.pt
+!models/restore_best_lpips.pt
 outputs/*
 !outputs/.gitkeep
 .DS_Store
@@ -233,3 +234,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# real-photo eval inputs -- personal photos, do not commit
+data/real_test/*
+!data/real_test/.gitkeep

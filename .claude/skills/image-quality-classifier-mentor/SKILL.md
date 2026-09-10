@@ -1,6 +1,6 @@
 ---
 name: image-quality-classifier-mentor
-description: "Use this skill for ANY work on the user's Photo Quality Classifier project — a from-scratch CNN that multi-label classifies images for defects (blur, underexposed, overexposed, noise, contrast), with a Streamlit upload UI, built with an eye toward a future image-enhancement phase. This skill governs HOW to collaborate on this specific project — teach through Socratic questioning instead of handing over finished code, explain every new import/library/concept before using it the first time, discuss the plan before writing anything, and ask the user what they think comes next after each step. Trigger this whenever the user references this project, its data pipeline, its model, its training/evaluation, or its UI — even if they just paste an error message or ask a narrow technical question, since the teaching style still applies."
+description: "Use this skill for ANY work on the user's Photo Quality Classifier project — a from-scratch CNN that multi-label classifies images for defects (blur, underexposed, overexposed, noise, contrast), a learned restoration U-Net that repairs flagged photos, and a Streamlit upload UI. This skill governs HOW to collaborate on this specific project — teach through Socratic questioning instead of handing over finished code, explain every new import/library/concept before using it the first time, discuss the plan before writing anything, and ask the user what they think comes next after each step. Trigger this whenever the user references this project, its data pipeline, its models, its training/evaluation, or its UI — even if they just paste an error message or ask a narrow technical question, since the teaching style still applies."
 ---
 
 # Photo Quality Classifier — Mentor Mode
@@ -111,45 +111,35 @@ over Claude's speed.
   slides a 256 window with stride 96 (~60% overlap, cap 16 tiles), scores all tiles, and
   aggregates **per defect: MAX across tiles for blur (local), MEAN for the other four (global)**.
   No retraining. Model loaded once via `@lru_cache`, CPU, `weights_only=True`.
-- **Phase 2a enhancement (built 2026-09-01, `src/enhance.py`) — classical, flag-driven.** User's
-  decision: the fix consumes the classifier's flags (no point classifying otherwise); it is NOT a
-  blind restoration net. `enhance(PIL, flags, probs) -> (PIL, applied_list)` runs only the flagged
-  fixes, in order `underexposed → overexposed → contrast → noise → blur` (denoise before sharpen;
-  sharpen amplifies noise). Each fix's strength = `clip((prob - 0.5) / 0.5, 0, 1)` — a detection
-  right at 0.5 barely touches the image, a 0.95 gets the full moderate fix. Tonal fixes run on the
-  LAB **L channel only** (no colour shift). Techniques: gamma 1.0→0.6 (underexposed), gamma
-  1.0→1.5 (overexposed), 1st/99th percentile stretch (contrast), `cv2.fastNlMeansDenoisingColored`
-  h 3→12 (noise), unsharp mask amount 0→0.8 (blur). HONEST LIMIT the user accepts: exposure and
-  contrast come out genuinely fixed; **noise and blur are only nudged** — classical methods can't
-  invent detail.
-- **Phase 2b roadmap (learned restoration) — SCOPED AND DEFERRED; documented in `docs/writeup.html`
-  section 11.** Do NOT start any of it unless the user explicitly asks. The classifier stays as-is
-  (it already says WHAT to fix); only the fix mechanism changes. Staged by effort:
-  - **Stage 1 (recommended entry point):** a small U-Net (encoder/decoder + skips, ~1–3M params)
-    or a DnCNN-style residual net, trained on the `raw_X_<defect>.png` ↔ `raw_X_clean.png` pairs
-    (and combo pairs) that `generate_synthetic.py` already produces — train-split pairs to train,
-    val/test pairs to measure. Flag-driven still applies: one net gated on "any flag," or one
-    small net per defect gated by its flag (keeps "only touch what's broken"). Loss: L1 to start,
-    optionally + SSIM or a light VGG-perceptual term; NOT GAN at this stage. Metrics: PSNR + SSIM
-    vs the clean target (replace macro-F1 as headline), on val/test + combo pairs separately.
-    Runs on CPU ~1–2 s/tiled image, so the current tiling + Streamlit stack is unchanged. Beats
-    classical clearly; not commercial-grade.
-  - **Stage 2 (needs a GPU):** replace the fixed Gaussian synthetics with a randomised degradation
-    pipeline (Real-ESRGAN style — random blur kernels incl. motion, mixed noise models, JPEG
-    re-compression, resize, random order/strength) + a larger/varied dataset (DIV2K / GoPro /
-    SIDD). This is what closes the "real photos differ from clean Gaussians" gap.
-  - **Stage 3:** bigger from-scratch arch (Restormer / NAFNet) with the Stage-2 pipeline
-    (months, GPU); OR load pretrained NAFNet/Restormer/SCUNet weights and run inference only
-    (fastest to professional, but 50–300 MB models, GPU host, abandons the from-scratch premise).
-  - **Hard limits no method fixes:** blown-out clipped highlights (data gone at capture);
-    perfect deblur (ill-posed).
-  - **Known blind spot (documented, NOT being fixed — user's explicit call 2026-09-05):**
-    can't distinguish intentional portrait bokeh (sharp subject, soft background) from a real
-    blur defect. Training pairs are always uniform-blur→uniform-sharp, so "soft on purpose" is
-    never a valid target; tiling also scores each 256px window alone with no way to know a sharp
-    subject exists elsewhere in frame. Will likely over-sharpen tasteful bokeh. A real fix needs a
-    whole-frame-aware (non-tiled) model — heavier, not CPU-friendly. Do not build a fix unless the
-    user asks; it's documented in README.md, docs/writeup.html section 11, and
+- **Phase 2a enhancement (`src/enhance.py`) — classical, flag-driven. NOW THE FALLBACK.** Kept in
+  `enhance.py` and runs only if the restoration checkpoint is missing. Per-flag fixes in order
+  `underexposed → overexposed → contrast → noise → blur`, strength `clip((prob-0.5)/0.5,0,1)`,
+  tonal fixes on LAB L only. Techniques: gamma (exposure), percentile stretch (contrast),
+  `cv2.fastNlMeansDenoisingColored` (noise), unsharp mask (blur).
+- **Phase 2b enhancement (BUILT & SHIPPED 2026-09-10) — learned blind restoration U-Net.**
+  `enhance(PIL, flags, probs)` now calls `src/restore_infer.py` → one blind ~4.3M-param residual
+  U-Net (`src/restore_model.py`, `RestoreUNet(base_channels=48, n_blocks=3)`), weights
+  `models/restore_best_lpips.pt` (whitelisted in `.gitignore`, ships with the repo). Blind = takes
+  only pixels; classifier decides only WHETHER to run it + labels what was targeted. Full-photo
+  inference is tiled (256 window, stride 192, raised-cosine blend), long side capped at 768.
+  - **Training (`src/train_restore.py`, run on a Kaggle T4 via `notebooks/kaggle_train.ipynb`):**
+    target = real clean image; input generated ON THE FLY by `src/degrade.py` (Real-ESRGAN-style:
+    Gaussian/motion/defocus/anisotropic blur, Poisson-Gaussian noise, JPEG + resize artifacts,
+    tone shifts; 1–3 per image, random order/strength). Loss `L1 + 0.1·(1−SSIM) + 0.05·VGG-perceptual`.
+    70 epochs, Adam 1e-4 + LinearLR warmup + grad-clip 1.0 (three earlier runs diverged before
+    those stabilisers; AMP was removed — SSIM unstable under fp16). Clean pool = COCO 4000 +
+    DIV2K 800, resized ≤800 px (`src/shrink_pool.py` → `data/clean_pool_small/`).
+  - **Result (29 real photos, `src/eval_restore.py`):** BRISQUE 15.9→10.6 (−33%), MUSIQ 63.2→65.6
+    (up on 27/29), exposure flags down, mild/moderate blur improved. **Strong motion blur barely
+    moves** — regression loss produces soft output on ill-posed deblur. Some light over-smoothing
+    (NIQE occasionally worsens).
+  - **Next iteration (NOT started — only if user asks): adversarial (GAN) loss** for strong deblur
+    + rebalance `degrade.py` toward the recoverable blur range + LR decay. This is the one real
+    open item; it's a loss-function problem, not a scale problem.
+  - **Hard limits:** blown clipped highlights (gone at capture); perfect deblur (ill-posed).
+  - **Known blind spot (documented, NOT fixed — user's call 2026-09-05):** can't tell intentional
+    portrait bokeh from a blur defect (uniform-blur→uniform-sharp training pairs; tiling sees each
+    256 window alone). May over-sharpen tasteful bokeh. In README, `docs/writeup.html` §7/§10/§11,
     [[phase2b-restoration-plan]].
 - **Streamlit app (`app.py`, repo root = the Community Cloud main file; built 2026-09-01):**
   multi-upload capped at `MAX_IMAGES = 15` (free-tier RAM; ingest downscales to long side 1400),
@@ -159,8 +149,8 @@ over Claude's speed.
   → before/after `st.columns(2)` + per-image `st.download_button`. Streamlit **1.62.0**; native
   elements only, no CSS, sentence casing, Material icons. `requirements.txt` already has every dep.
 - **UI (BUILT):** see the Streamlit-app fact above. `app.py` is the deployment entry point.
-- **Phase 2 status:** 2a done, 2b deferred (both above). When touching the data pipeline, still
-  keep the degradation functions reusable — they are what a future restoration net would train on.
+- **Phase 2 status:** 2a (classical, now fallback) and 2b (learned U-Net, shipped) both done —
+  see the two enhancement facts above.
 - **Timeline:** resume-focused, originally scoped at 1-2 weeks. Scope creep is a known risk the
   user has explicitly asked to be protected against — call it out if a tangent threatens the
   timeline.
@@ -207,30 +197,23 @@ over Claude's speed.
    precision/recall, whatever is relevant — rather than waiting to be asked. The user has
    explicitly asked for visibility into what needs tuning, not just final numbers.
 
-## Project status (updated 2026-09-02)
+## Project status (updated 2026-09-10)
 
-Phase 1 (classifier) and phase 2a (classical enhancer) are **complete, frozen, and DEPLOYED** —
-live at `imagequalityclassifier.streamlit.app` (Streamlit Community Cloud, public repo
-`github.com/Mohdshamik11/ImageQuality_Classifier`, branch `main`, main file `app.py`, Python 3.11).
-Deploy prep is commit `eb863c3` (`.gitignore` gained `!models/traincombo_best.pt`;
-`requirements.txt` trimmed to app-only with `--extra-index-url https://download.pytorch.org/whl/cpu`
-+ `opencv-python-headless`; `requirements-dev.txt` added; `SETUP.md` step 6 → dev file). Redeploys
-on push to `main`. OOM fallback: `MAX_IMAGES` 8 / `INGEST_LONG_SIDE` 1000 in `app.py`.
+**All three phases done and DEPLOYED** — live at `imagequalityclassifier.streamlit.app`
+(Streamlit Community Cloud, public repo `github.com/Mohdshamik11/ImageQuality_Classifier`,
+branch `main`, main file `app.py`, Python 3.11; redeploys on push to `main`).
 
-Do NOT reopen phase 1 or phase 2a unless the user asks.
+- **Phase 1 — classifier:** frozen, `models/traincombo_best.pt`. See fact above + [[baseline-model-spec]].
+- **Phase 2a — classical enhancer:** now the fallback inside `enhance.py`.
+- **Phase 2b — learned restoration U-Net:** shipped, `models/restore_best_lpips.pt`. See fact
+  above + [[phase2b-restoration-plan]].
 
-**PHASE 2B IS NOW ACTIVE (started 2026-09-02).** The user has explicitly chosen to build the
-learned restoration model, package the whole thing, and post it. Full locked design is in the
-`[[phase2b-restoration-plan]]` memory. Short version: ONE blind image-to-image regression U-Net
-(residual, ~1–5M params) handling all 5 defects — exposure/contrast folded in, no longer
-classical; classifier stays system-level only (gate + display + self-check), NOT fed to the
-model. Trained on-the-fly on `(realistically-degraded → clean)` pairs from public images
-(COCO + DIV2K/Flickr2K). Loss L1 + SSIM + VGG-perceptual. Metrics PSNR/SSIM/LPIPS + classifier-
-recheck + no-reference on the user's 20 real photos. **Build order: `src/degrade.py` first**
-(the degradation pipeline — everything rides on its realism), then `src/restore_dataset.py`,
-`src/restore_model.py`, `notebooks/05_restoration.ipynb`, then integrate into `enhance.py` +
-redeploy. As of 2026-09-02 nothing is built yet; the user is studying the concept list first
-(also in the phase2b memory). The mentor collaboration rules below apply throughout.
+Do NOT reopen any phase unless the user asks. The one genuinely open item is the **GAN-loss
+iteration for strong deblur** — scoped in the phase-2b fact, NOT started, only on request.
+
+`requirements.txt` (app-only, CPU torch) needs no changes for phase 2b — `restore_infer.py` uses
+only torch/numpy/PIL. The eval-only deps (`pyiqa`, `lpips`, `pytorch-msssim`) are in
+`requirements-dev.txt`. OOM fallback for the app: `MAX_IMAGES` 8 / `INGEST_LONG_SIDE` 1000.
 
 ## Multi-label data schema
 

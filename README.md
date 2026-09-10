@@ -5,8 +5,8 @@ five kinds of quality defect at once — **blur, underexposure, overexposure, se
 low contrast**, then runs a full restoration on the whole image.
 
 **Live demo:** https://imagequalityclassifier.streamlit.app
-**Full build log:** [`docs/writeup.html`](docs/writeup.html) — data pipeline, four training
-iterations for the classifier model, metrics, and the reasoning behind every decision.
+**Full build log:** [`docs/writeup.html`](docs/writeup.html) — data pipeline, the classifier's
+four training iterations, the learned restoration model, metrics, and the reasoning behind every decision.
 
 ---
 
@@ -16,7 +16,10 @@ iterations for the classifier model, metrics, and the reasoning behind every dec
   so the model has five independent yes/no outputs, not one "pick a class."
 - **Tiled inference.** Uploads are scanned by sliding a 256-pixel window across the whole frame,
   so a defect anywhere in the image is caught (blur is often local; exposure/noise are global).
-- **Enhancement.** A new model that is built on the U-Net architecture to encodes and decodes the image to restore it.
+- **Learned restoration (phase 2b).** The "Enhance" button runs a blind ~4.3M-parameter residual
+  U-Net trained on a realistic on-the-fly degradation pipeline. It denoises, corrects exposure and
+  contrast, and improves mild-to-moderate blur. Strong motion blur is the hard case. The classical
+  per-flag fixes (phase 2a) remain as a fallback.
 
 ### Results (held-out test set, threshold 0.5)
 
@@ -38,15 +41,22 @@ giving 4,500 single-defect images plus a matched clean copy of every scene. Vali
 also get 100 genuinely *multi-defect* images as a held-out probe.
 
 ```
-data pipeline            model                        app
-─────────────            ─────                        ───
-download_raw_images.py   BaselineCNN (src/model.py)   predict.py  — tiled inference
-  → data/raw/            4 conv stages, 8.8M params    enhance.py  — 5 classical fixes
-generate_synthetic.py    trained in notebooks/        app.py      — Streamlit UI
-  → data/synthetic/        01_baseline → 04_train_combos
-split_dataset.py         → models/traincombo_best.pt
-generate_combos.py
-  → labels.csv
+CLASSIFIER (phase 1)
+  download_raw_images.py → data/raw/       BaselineCNN (src/model.py), 4 conv stages
+  generate_synthetic.py → data/synthetic/  trained in notebooks/ 01→04
+  split_dataset.py / generate_combos.py    → models/traincombo_best.pt
+
+RESTORATION (phase 2b)
+  degrade.py          realistic degradation, applied on the fly (no files saved)
+  restore_dataset.py  (clean crop → degrade → pair) DataLoaders
+  restore_model.py    ~4.3M-param residual U-Net
+  train_restore.py    training loop (run on Kaggle T4) → models/restore_best_lpips.pt
+
+APP
+  predict.py       tiled classifier inference
+  restore_infer.py tiled restoration inference
+  enhance.py       learned restoration, classical fallback
+  app.py           Streamlit UI
 ```
 
 ---
@@ -67,16 +77,17 @@ pip install -r requirements-dev.txt        # full env; requirements.txt alone is
 
 ### The app
 
-The trained model (`models/traincombo_best.pt`) ships with the repo, so the app runs immediately:
+Both trained models (`models/traincombo_best.pt`, `models/restore_best_lpips.pt`) ship with the
+repo, so the app runs immediately:
 
 ```bash
 streamlit run app.py
 ```
 
 Upload up to 15 photos → each is classified and shown as a card (click to see the five scores) →
-"Enhance" repairs the flagged ones and shows the before/after.
+"Enhance" restores the flagged ones and shows the before/after.
 
-### Reproduce the pipeline and training
+### Reproduce — classifier
 
 ```bash
 python src/download_raw_images.py --num-images 750    # ~1 GB download from COCO
@@ -86,9 +97,20 @@ python src/generate_combos.py                         # 50 val + 50 test multi-d
 python src/generate_combos.py --n-train 525           # add training combos (iteration 4)
 ```
 
-Then run the notebooks in order — `notebooks/01_baseline.ipynb` through
-`04_train_combos.ipynb`. Each writes a checkpoint and a per-epoch history to `models/`.
-Everything is seeded (`42`).
+Then run `notebooks/01_baseline.ipynb` → `04_train_combos.ipynb` in order. Seeded (`42`).
+
+### Reproduce — restoration model
+
+```bash
+python src/download_raw_images.py --num-images 4000 --output-dir data/clean_pool/coco
+python src/download_div2k.py                          # +800 hi-res images
+python src/shrink_pool.py                             # → data/clean_pool_small/ (≤800 px)
+python src/train_restore.py                           # local; or notebooks/kaggle_train.ipynb on a Kaggle GPU
+```
+
+`train_restore.py` generates the degraded inputs on the fly (`src/degrade.py`) — no paired
+dataset is stored. Config (epochs, loss weights, model size) is the block at the top of the file.
+Evaluate on real photos with `python src/eval_restore.py` (drop photos in `data/real_test/`).
 
 ---
 
@@ -97,47 +119,55 @@ Everything is seeded (`42`).
 ```
 app.py                     Streamlit UI (deployment entry point)
 src/
-  download_raw_images.py    COCO subset → data/raw/
+  download_raw_images.py    COCO subset → data/raw/ (also the restoration clean pool)
+  download_div2k.py         DIV2K hi-res images for the clean pool
   generate_synthetic.py     the five degradations → data/synthetic/ + labels.csv
   split_dataset.py          scene-level train/val/test split
   generate_combos.py        multi-defect images (val/test probes; --n-train for training)
-  dataset.py                PyTorch Dataset + DataLoaders (augment=True = crop pipeline)
+  dataset.py                classifier Dataset + DataLoaders (augment=True = crop pipeline)
   model.py                  BaselineCNN — 4 conv stages + a small head
   metrics.py                per-class precision/recall/F1, macro-F1, PR-AUC, threshold sweep
-  predict.py                tiled inference: PIL image → per-defect probabilities
-  enhance.py                the five classical fixes + a flag-driven orchestrator
-notebooks/                  01–04, one per training iteration
-docs/writeup.html           full build log with charts
-models/traincombo_best.pt   the frozen model the app uses
+  predict.py                tiled classifier inference: PIL image → per-defect probabilities
+  degrade.py                realistic on-the-fly degradation pipeline
+  shrink_pool.py            resize the clean pool to ≤800 px
+  restore_dataset.py        (clean crop → degrade → pair) DataLoaders + sealed test split
+  restore_model.py          the ~4.3M-param residual U-Net
+  train_restore.py          restoration training loop (config block at top)
+  restore_infer.py          tiled restoration inference
+  eval_restore.py           real-photo eval: before/after + no-ref metrics + classifier re-check
+  enhance.py                learned restoration, with the classical per-flag fixes as fallback
+notebooks/
+  01_baseline … 04_train_combos   the classifier's four iterations
+  kaggle_train.ipynb              thin wrapper to run train_restore.py on a Kaggle GPU
+docs/writeup.html                 full build log with charts
+models/traincombo_best.pt         the frozen classifier
+models/restore_best_lpips.pt      the restoration model
 ```
 
 ---
 
-## Future plans — reliable enhancement
+## Results — restoration model
 
-Phase 2a (the current "Enhance" button) is **classical**, and classical repair of noise and blur
-has a hard ceiling: it cannot invent detail. Exposure and contrast come out genuinely fixed;
-noise and blur are only nudged. The staged plan to fix that:
+On a 29-photo real-world test set (`src/eval_restore.py`):
 
-- **Stage 1 — a small restoration network.** A U-Net or DnCNN-style residual net trained on the
-  *(degraded → clean)* pairs `generate_synthetic.py` already produces. L1 (+ optional SSIM /
-  perceptual) loss, PSNR / SSIM as metrics, still flag-driven. Runs on CPU — same deployment.
-  Clearly better than unsharp mask; not commercial-grade.
-- **Stage 2 — realistic degradations.** Replace the clean Gaussian synthetics with a randomised
-  pipeline (motion blur, mixed noise models, JPEG re-compression) plus a larger dataset. This is
-  what makes it generalise to real photos. Needs a GPU.
-- **Stage 3 — bigger models.** A modern architecture (Restormer, NAFNet) from scratch, or load
-  pretrained weights and run inference only.
+- **BRISQUE 15.9 → 10.6** (−33%, lower is better) · **MUSIQ 63.2 → 65.6** (up on 27 of 29)
+- Denoising and exposure/contrast correction are genuinely useful; overexposure flags drop.
+- **Mild-to-moderate blur** improves noticeably.
+- **Strong motion blur barely moves** — see below.
 
-**Hard limits no method fixes:** blown-out highlights (the data was clipped at capture), and
-perfect deblurring (it's an ill-posed problem).
+## Known limits & what's next
 
-**Known blind spot: portrait bokeh.** The restoration model can't distinguish a genuine blur
-defect from intentional shallow depth-of-field (a sharp subject, soft background). Training pairs
-are always uniformly-blurred → uniformly-sharp, so "soft on purpose" is never a valid target; and
-tiled inference scores each 256×256 window on its own, with no way to know a sharp subject exists
-elsewhere in the frame. It will likely try to sharpen tasteful bokeh backgrounds. A real fix needs
-a whole-frame-aware model — heavier, not CPU-friendly — so this is accepted, not addressed.
+- **Strong motion blur.** L1 / SSIM / perceptual are regression losses: when a blurry patch could
+  have come from many sharp patches, the loss-minimising output is their (soft) average. More
+  epochs or channels don't change that ceiling. The fix is an **adversarial (GAN) loss** — a
+  discriminator that penalises "looks blurry" directly — plus rebalancing `degrade.py` toward the
+  recoverable blur range. That's the next training iteration.
+- **Blown-out highlights** are unrecoverable (detail was clipped at capture).
+- **Portrait bokeh.** The model can't tell intentional shallow depth-of-field from a blur defect —
+  training pairs are always uniformly blurred → uniformly sharp, and tiled inference sees each
+  256×256 window alone with no view of a sharp subject elsewhere. It may over-sharpen tasteful
+  bokeh backgrounds. A fix needs a whole-frame-aware model; accepted, not addressed.
+- **Output is capped at 768 px** long side for CPU speed on the free host.
 
 ---
 
