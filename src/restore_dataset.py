@@ -56,13 +56,14 @@ def _to_tensor(img_u8: np.ndarray) -> torch.Tensor:
 
 class RestoreDataset(Dataset):
     def __init__(self, paths, mode: str = "train", patch: int = PATCH,
-                 p_identity: float = 0.12, val_seed: int = 1234):
+                 p_identity: float = 0.12, val_seed: int = 1234, degrade_fn=degrade):
         assert mode in ("train", "val")
         self.paths = [Path(p) for p in paths]
         self.mode = mode
         self.patch = patch
         self.p_identity = p_identity
         self.val_seed = val_seed
+        self.degrade_fn = degrade_fn   # e.g. degrade_blur_only for the GAN fine-tune
 
     def __len__(self) -> int:
         return len(self.paths)
@@ -97,11 +98,11 @@ class RestoreDataset(Dataset):
             if rng.random() < self.p_identity:
                 degraded = clean.copy()          # identity pair: "leave good photos alone"
             else:
-                degraded = degrade(clean, rng)
+                degraded = self.degrade_fn(clean, rng)
         else:
             rng = np.random.default_rng(self.val_seed + idx)  # stable pair every epoch
             clean = self._crop(clean_full, rng)
-            degraded = degrade(clean, rng)
+            degraded = self.degrade_fn(clean, rng)
 
         return _to_tensor(degraded), _to_tensor(clean)
 
@@ -117,7 +118,7 @@ def _list_images(dirs):
 
 def build_restore_loaders(clean_dirs, batch_size: int = 16, val_frac: float = 0.08,
                           test_frac: float = 0.06, num_workers: int = 0, seed: int = 42,
-                          patch: int = PATCH):
+                          patch: int = PATCH, degrade_fn=degrade):
     """Split clean images file-level into train/val/test (no image in more than one)
     and return {"train": loader, "val": loader, "test": loader}. File-level is
     enough here -- unlike the classifier there are no per-scene variants to leak.
@@ -137,9 +138,9 @@ def build_restore_loaders(clean_dirs, batch_size: int = 16, val_frac: float = 0.
     test_idx = perm[n_val:n_val + n_test]
     train_idx = perm[n_val + n_test:]
 
-    train_ds = RestoreDataset([paths[i] for i in train_idx], mode="train", patch=patch)
-    val_ds = RestoreDataset([paths[i] for i in val_idx], mode="val", patch=patch)
-    test_ds = RestoreDataset([paths[i] for i in test_idx], mode="val", patch=patch)  # sealed = deterministic like val
+    train_ds = RestoreDataset([paths[i] for i in train_idx], mode="train", patch=patch, degrade_fn=degrade_fn)
+    val_ds = RestoreDataset([paths[i] for i in val_idx], mode="val", patch=patch, degrade_fn=degrade_fn)
+    test_ds = RestoreDataset([paths[i] for i in test_idx], mode="val", patch=patch, degrade_fn=degrade_fn)  # sealed = deterministic like val
 
     def _dl(ds, shuffle):
         return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=num_workers,

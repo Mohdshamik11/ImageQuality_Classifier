@@ -26,6 +26,7 @@ All maths is done in float32 [0, 1]. Input and output are uint8 RGB HxWx3.
 Usage (eyeball a few):
     python src/degrade.py                       # degrades 8 images from data/raw/
     python src/degrade.py path/to/image.jpg     # degrades one image, 6 variants
+    python src/degrade.py --blur-only           # preview degrade_blur_only() instead
 """
 from pathlib import Path
 
@@ -53,17 +54,20 @@ def _skew(rng, lo, hi, power=2.0):
 
 # ---- individual degradations (float [0,1] in, float [0,1] out) ----------- #
 
-def _blur(img, rng):
-    """One of four blur types, random strength."""
+def _blur(img, rng, power=2.0):
+    """One of four blur types, random strength. `power` is passed to `_skew`:
+    2.0 (default, used by the general pipeline) packs strength toward mild;
+    lower values (e.g. 1.3, used by the blur-only pipeline below) spread more
+    weight onto moderate/strong blur, since that pipeline's only job is blur."""
     kind = rng.choice(["gauss", "motion", "defocus", "aniso"])
 
     if kind == "gauss":
-        sigma = _skew(rng, 0.4, 2.0)
+        sigma = _skew(rng, 0.4, 2.0, power)
         return cv2.GaussianBlur(img, ksize=(0, 0), sigmaX=sigma)
 
     if kind == "motion":
         # A line of ones, rotated to a random angle -> smear along that direction.
-        length = int(_skew(rng, 4, 17))
+        length = int(_skew(rng, 4, 17, power))
         angle = rng.uniform(0, 180)
         k = np.zeros((length, length), np.float32)
         k[length // 2, :] = 1.0
@@ -74,7 +78,7 @@ def _blur(img, rng):
 
     if kind == "defocus":
         # A filled disc -> the classic out-of-focus "circle of confusion".
-        radius = max(2, int(_skew(rng, 2, 6)))
+        radius = max(2, int(_skew(rng, 2, 6, power)))
         d = 2 * radius + 1
         k = np.zeros((d, d), np.float32)
         cv2.circle(k, (radius, radius), radius, 1.0, -1)
@@ -82,7 +86,7 @@ def _blur(img, rng):
         return cv2.filter2D(img, -1, k)
 
     # anisotropic Gaussian: different sigma on x and y -> directional softness
-    sx, sy = _skew(rng, 0.4, 2.0), _skew(rng, 0.4, 2.0)
+    sx, sy = _skew(rng, 0.4, 2.0, power), _skew(rng, 0.4, 2.0, power)
     return cv2.GaussianBlur(img, ksize=(0, 0), sigmaX=sx, sigmaY=sy)
 
 
@@ -174,23 +178,64 @@ def degrade(clean_rgb, rng, return_recipe=False):
     return (out, recipe) if return_recipe else out
 
 
+# ---- blur-only pipeline (for the blur-specialist GAN fine-tune) ---------- #
+
+def degrade_blur_only(clean_rgb, rng, return_recipe=False):
+    """Clean uint8 RGB -> blurred uint8 RGB. Used only for the blur-specialist
+    fine-tune (src/train_restore_gan.py) -- NOT the general `degrade()` above.
+
+    Exposure/contrast are already handled by the classical fixes and noise by
+    Real-ESRGAN in the shipped pipeline (see src/enhance.py), so this model's
+    training data is scoped to just blur -- narrower task, all its capacity and
+    the adversarial loss pointed at the one hard, ill-posed problem.
+
+    Differences from the general pipeline's blur op:
+      - power=1.3 (vs 2.0): flatter skew, more moderate/strong coverage, since
+        this is the only degradation the model ever sees.
+      - occasionally a second, lighter blur pass (camera shake + defocus can
+        stack in a real photo).
+      - JPEG kept (not a "defect", just how photos are actually saved) at high
+        probability; no noise / tone / resize.
+    """
+    img = _to_float(clean_rgb)
+    recipe = []
+
+    img = _blur(img, rng, power=1.3)
+    recipe.append("blur")
+
+    if rng.random() < 0.15:                       # stacked blur (shake + defocus)
+        img = _blur(img, rng, power=1.3)
+        recipe.append("blur2")
+
+    if rng.random() < 0.85:
+        img = _jpeg(img, rng)
+        recipe.append("jpeg")
+
+    out = _to_uint8(np.clip(img, 0.0, 1.0))
+    return (out, recipe) if return_recipe else out
+
+
 if __name__ == "__main__":
     import sys
 
+    blur_only = "--blur-only" in sys.argv
+    args = [a for a in sys.argv[1:] if a != "--blur-only"]
+    fn = degrade_blur_only if blur_only else degrade
+
     rng = np.random.default_rng(0)
-    out_dir = Path("outputs/degrade_preview")
+    out_dir = Path("outputs/degrade_preview" + ("_blur_only" if blur_only else ""))
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    if len(sys.argv) > 1:
-        srcs = [Path(sys.argv[1])] * 6
+    if args:
+        srcs = [Path(args[0])] * 6
     else:
         srcs = sorted(Path("data/raw").glob("raw_00[0-1][0-9].jpg"))[:8]
 
     for i, p in enumerate(srcs):
         bgr = cv2.imread(str(p))
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-        deg, recipe = degrade(rgb, rng, return_recipe=True)
-        stem = f"{p.stem}_deg{i}" if len(sys.argv) > 1 else p.stem
+        deg, recipe = fn(rgb, rng, return_recipe=True)
+        stem = f"{p.stem}_deg{i}" if args else p.stem
         cv2.imwrite(str(out_dir / f"{stem}.png"), cv2.cvtColor(deg, cv2.COLOR_RGB2BGR))
         print(f"{stem:18s} {' -> '.join(recipe)}")
 
