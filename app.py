@@ -143,7 +143,7 @@ enhance_all = st.checkbox(
          "flagged defects.",
 )
 strength = st.slider(
-    "Enhancement strength", 0.0, 1.0, 0.75, 0.05,
+    "Enhancement strength", 0.0, 1.0, 0.5, 0.05,
     help="Lower values blend the result back toward the original, trading some of the "
          "fix for the original's sharpness and contrast. Re-run after changing.",
 )
