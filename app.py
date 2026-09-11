@@ -5,10 +5,9 @@ Flow:
   1. Upload up to MAX_IMAGES photos.
   2. Each is classified on ingest (tiled -- see src/predict.py) and shown as a
      card. A card's five per-defect scores are hidden until you expand it.
-  3. "Enhance" runs the classical, flag-driven fixes (src/enhance.py) on every
-     photo with a flagged defect. An "AI restoration (experimental)" checkbox
-     switches to the learned phase-2b U-Net (src/restore_infer.py) instead --
-     opt-in because it tends to soften detail.
+  3. "Enhance" runs the flag-driven fixes (src/enhance.py) on every photo with
+     a flagged defect: classical fixes for exposure/contrast/noise, and the
+     trained blur-specialist GAN for blur.
 
 Run locally:  streamlit run app.py
 Deploy:       Streamlit Community Cloud, main file = app.py
@@ -128,30 +127,20 @@ for start in range(0, len(items), PER_ROW):
 st.divider()
 
 known = [f for f in files if file_key(f) in st.session_state["items"]]
-flagged = [f for f in known
-           if any(st.session_state["items"][file_key(f)]["pred"]["flags"].values())]
 
-use_model = st.checkbox(
-    "Try AI restoration (experimental)", value=False,
-    help="Uses a learned model instead of the classical fixes. It corrects exposure "
-         "well but tends to soften detail and flatten contrast, so it is often a net "
-         "loss on photos that aren't badly degraded.",
-)
-enhance_all = st.checkbox(
-    "Also enhance photos with no flagged defects", value=False,
-    help="Only meaningful with AI restoration on; the classical fixes touch only "
-         "flagged defects.",
-)
 strength = st.slider(
     "Enhancement strength", 0.0, 1.0, 0.5, 0.05,
     help="Lower values blend the result back toward the original, trading some of the "
          "fix for the original's sharpness and contrast. Re-run after changing.",
 )
 
-to_fix = known if enhance_all else flagged
+# Every photo runs -- enhance() scales each fix by its own raw defect probability,
+# so a "clean" photo (everything near 0%) comes back effectively untouched, while
+# one with a sub-threshold defect (say 30% blur, not enough to earn the "flagged"
+# badge above) still gets a proportionally mild fix instead of nothing at all.
+to_fix = known
 
 if not to_fix:
-    st.info("No defects flagged. Tick 'Also enhance photos with no flagged defects' to run anyway.")
     st.stop()
 
 if st.button(f"Enhance {len(to_fix)} photo(s)", type="primary",
@@ -161,7 +150,7 @@ if st.button(f"Enhance {len(to_fix)} photo(s)", type="primary",
     for i, f in enumerate(to_fix, 1):
         it = st.session_state["items"][file_key(f)]
         out_img, applied = enhance(it["image"], it["pred"]["flags"], it["pred"]["probs"],
-                                   strength=strength, use_model=use_model)
+                                   strength=strength)
         st.session_state["enhanced"][file_key(f)] = {"image": out_img, "applied": applied}
         bar.progress(i / len(to_fix), text=f"Enhancing {it['name']}  ({i}/{len(to_fix)})")
     bar.empty()
@@ -174,7 +163,8 @@ if st.session_state["enhanced"]:
         if not enh:
             continue
         it = st.session_state["items"][file_key(f)]
-        st.markdown(f"**{it['name']}** &nbsp; {', '.join(enh['applied'])}")
+        summary = ", ".join(enh["applied"]) if enh["applied"] else "no changes -- already clean"
+        st.markdown(f"**{it['name']}** &nbsp; {summary}")
         a, b = st.columns(2, gap="medium")
         a.image(it["image"], caption="original", width="stretch")
         b.image(enh["image"], caption="enhanced", width="stretch")
@@ -189,6 +179,6 @@ if st.session_state["enhanced"]:
 
 st.caption(
     "Model: iteration 4 (`models/traincombo_best.pt`), test macro-F1 0.91 single-defect / 0.88 multi-defect. "
-    "Enhancement is classical and flag-driven: gamma for exposure, percentile stretch for contrast, "
-    "non-local means for noise, unsharp mask for blur; strength scales with the classifier's confidence."
+    "Enhancement is flag-driven: gamma for exposure, percentile stretch for contrast, "
+    "non-local means for noise, a trained GAN for blur; strength scales with the classifier's confidence."
 )
