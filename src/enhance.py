@@ -77,14 +77,52 @@ def _blend_to_original(original: Image.Image, result: Image.Image, strength: flo
 # --------------------------------------------------------------------------- #
 # per-defect fixes (rgb uint8 in/out)
 # --------------------------------------------------------------------------- #
-def fix_underexposed(rgb, strength):
-    gamma = 1.0 - 0.4 * strength                      # lift midtones/shadows
-    return _on_luminance(rgb, lambda L: 255.0 * (L / 255.0) ** gamma)
+def _gamma_to_target(measured: float, target: float, gamma_bounds=(0.5, 1.8)) -> float:
+    """The gamma that maps `measured` (0-255) onto `target` (0-255): solves
+    255*(measured/255)**gamma == target for gamma. Bounds keep the correction
+    a global tone shift rather than a crush -- a measured value pinned near 0
+    or 255 (heavy clipping) would otherwise demand a huge exponent, and
+    because gamma applies to the WHOLE luminance channel at once, an extreme
+    exponent needed to fix a few blown pixels would also crush every midtone
+    in the photo along with them. First measured value: 254/1, keeps both
+    logs well-defined."""
+    measured = min(max(measured, 1.0), 254.0)
+    gamma = np.log(target / 255.0) / np.log(measured / 255.0)
+    return float(np.clip(gamma, gamma_bounds[0], gamma_bounds[1]))
 
 
-def fix_overexposed(rgb, strength):
-    gamma = 1.0 + 0.5 * strength                      # pull the bright end down
-    return _on_luminance(rgb, lambda L: 255.0 * (L / 255.0) ** gamma)
+def fix_underexposed(rgb, strength, target=65.0, pct=25.0):
+    """Gamma computed from the image's OWN lower-midtone level (25th
+    percentile), not a fixed guess: a mildly dim photo and a very dark one get
+    correspondingly different lifts. Using a lower-MIDtone percentile rather
+    than a deep-shadow one (5th, 1st) keeps the measurement representative of
+    overall brightness -- exactly what "underexposed" means -- instead of
+    being thrown off by a small patch of near-black shadow that doesn't
+    reflect the photo as a whole. Can't do anything for pixels truly clipped
+    to 0 -- gamma leaves 0 and 255 unchanged no matter the exponent, there's
+    no tonal data left to move."""
+    def stretch(L):
+        lo = np.percentile(L, pct)
+        if lo >= target:                                # already bright enough down there
+            return L
+        gamma = _gamma_to_target(lo, target)
+        corrected = 255.0 * (L / 255.0) ** gamma
+        return L * (1.0 - strength) + corrected * strength
+    return _on_luminance(rgb, stretch)
+
+
+def fix_overexposed(rgb, strength, target=190.0, pct=75.0):
+    """Mirrors fix_underexposed for the bright end (upper-midtone/75th
+    percentile, not just the blown highlights) -- same clipping caveat
+    applies to pixels already sitting at pure 255."""
+    def stretch(L):
+        hi = np.percentile(L, pct)
+        if hi <= target:                                # already dark enough up there
+            return L
+        gamma = _gamma_to_target(hi, target)
+        corrected = 255.0 * (L / 255.0) ** gamma
+        return L * (1.0 - strength) + corrected * strength
+    return _on_luminance(rgb, stretch)
 
 
 def fix_low_contrast(rgb, strength):

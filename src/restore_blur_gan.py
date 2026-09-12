@@ -20,7 +20,7 @@ from PIL import Image
 from restore_model import RestoreUNet
 from restore_infer import restore_tensor, MAX_LONG_SIDE
 
-CKPT = Path(__file__).resolve().parent.parent / "models" / "restore_blur_gan_lpips.pt"
+CKPT = Path(__file__).resolve().parent.parent / "models" / "restore_blur_gan_real_ext_lpips.pt"  # TESTING -- extended RealBlur fine-tune (30 epochs total), not yet committed as default
 
 # must match src/train_restore_gan.py CONFIG (warm-started from restore_infer's checkpoint,
 # so same architecture)
