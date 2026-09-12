@@ -10,6 +10,7 @@ data/synthetic/*
 # Phase 2b restoration -- large clean-image pool + download scratch (never commit)
 data/clean_pool/
 data/clean_pool_small/
+data/realblur/
 data/_coco_temp/
 data/_div2k_temp/
 models/*.pt
