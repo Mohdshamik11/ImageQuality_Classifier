@@ -11,4 +11,3 @@ torchvision>=0.16.0
 opencv-python-headless>=4.8.0   # -headless: no libGL needed on a headless server
 pillow>=10.0.0
 numpy>=1.24.0
-spandrel>=0.4.0                 # loads the pretrained Real-ESRGAN weights (src/restore_sota.py)

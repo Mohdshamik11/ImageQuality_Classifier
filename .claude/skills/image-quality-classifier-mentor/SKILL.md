@@ -111,27 +111,73 @@ over Claude's speed.
   slides a 256 window with stride 96 (~60% overlap, cap 16 tiles), scores all tiles, and
   aggregates **per defect: MAX across tiles for blur (local), MEAN for the other four (global)**.
   No retraining. Model loaded once via `@lru_cache`, CPU, `weights_only=True`.
-- **Phase 2a enhancement (`src/enhance.py`) — classical, flag-driven. NOW THE FALLBACK.** Kept in
-  `enhance.py` and runs only if the restoration checkpoint is missing. Per-flag fixes in order
-  `underexposed → overexposed → contrast → noise → blur`, strength `clip((prob-0.5)/0.5,0,1)`,
-  tonal fixes on LAB L only. Techniques: gamma (exposure), percentile stretch (contrast),
-  `cv2.fastNlMeansDenoisingColored` (noise), unsharp mask (blur).
-- **Enhancement — final design (2026-09-11).** `enhance(PIL, flags, probs, strength=1.0, use_model=False)`:
-  - `use_model=False` (DEFAULT, app "Enhance" button) → classical per-flag fixes.
-  - `use_model=True` (app "AI restoration" checkbox, off by default) → **pretrained Real-ESRGAN**
-    `realesr-general-x4v3` (~5MB, `models/realesr-general-x4v3.pth`, whitelisted) loaded via
-    **`spandrel`** (`src/restore_sota.py`) — no `basicsr`. It's an x4 SR model used as a restorer:
-    input capped 512 long side → x4 forward (~1.5s CPU) → clamp → downscale to ≤1400. Falls back
-    to the from-scratch U-Net then classical if weights absent.
-  - `strength` 0–1 blends output↔a plain resize of the input (both AI paths + classical).
-  - `requirements.txt` gained `spandrel` (pulls only `einops` + `safetensors` new — free-tier fine).
-- **From-scratch phase-2b U-Net (BUILT, evaluated, NOT shipped) — `src/restore_model.py` /
-  `restore_infer.py`, weights `models/restore_best_lpips.pt`.** Kept in the repo as the documented
-  training exercise. On real photos it corrects exposure but **softens detail + flattens contrast**
-  (regression-loss artifact — L1/SSIM/perceptual pick the average of all plausible sharp patches).
-  No-ref eval metrics (BRISQUE/MUSIQ) missed it because they reward smoothness; the user (a
-  photographer) caught it by eye. Fixing it = adversarial (GAN) loss 2nd stage + more data/compute
-  than a free tier / single Kaggle T4 allows → chose pretrained SOTA inference instead.
+- **Enhancement — current design (2026-09-12), one unified path, no mode toggle.**
+  `enhance(image, flags, probs, strength=1.0)` in `src/enhance.py`. Every fix's strength scales
+  DIRECTLY off the classifier's raw per-defect probability (`strength_from_prob(p) = clip(p,0,1)`)
+  — NOT gated by the 50% "flagged" threshold, and NOT a mode you toggle. A photo just under
+  threshold still gets a proportionally mild fix; a genuinely clean photo (probabilities near 0)
+  comes back untouched because there's nothing to scale up. Fixes below `MIN_STRENGTH` (0.02) are
+  skipped outright. Order: tonal fixes (underexposed → overexposed → contrast, gamma-curve based,
+  data-driven — see below) → blur (the GAN, see next fact) → noise (`cv2.fastNlMeansDenoisingColored`,
+  LAST, since it must not run before the blur-GAN — denoising first would smooth away texture the
+  GAN needs to sharpen; the classical-unsharp-mask fallback wants the OPPOSITE order, denoise
+  before sharpen, since sharpening amplifies noise).
+  - `fix_overexposed`/`fix_underexposed` measure severity from the image's own 75th/25th
+    percentile (NOT 95th/5th — that was tried first and was a real bug: gamma applies to the
+    WHOLE luminance channel at once, so using an extreme percentile as the severity signal let a
+    handful of already-blown highlight pixels demand a huge gamma that crushed every midtone in
+    the photo; verified with real numbers — a "mild" ×1.05 brightening collapsed median brightness
+    176→95 before the fix). 75th/25th percentile tracks overall brightness, which is what
+    "overexposed"/"underexposed" actually mean. Gamma bound clamped to [0.5, 1.8]. Hard limit:
+    gamma leaves 0 and 255 exactly unchanged for any exponent (`(255/255)^gamma = 1` always) —
+    truly clipped pixels are unrecoverable by any gamma curve, classical or learned.
+  - Real-ESRGAN and the from-scratch phase-2b U-Net are BOTH fully removed from this path — see
+    the next fact for why, and for what replaced them.
+- **Blur-specialist GAN (`src/restore_blur_gan.py`, shipped 2026-09-12) — what replaced Real-ESRGAN
+  and the from-scratch U-Net for blur.** Same `RestoreUNet` architecture
+  (`base_channels=48, n_blocks=3`, ~4.3M params) as the original phase-2b U-Net below, but
+  continued training with an ADVERSARIAL (GAN) loss instead of stopping at pure regression loss —
+  this is exactly "the one real open item" the earlier phase-2b section below used to call out as
+  not-yet-started; it's now built, trained, and shipped.
+  - **Discriminator (`src/discriminator.py`):** `UNetDiscriminatorSN`, Real-ESRGAN's own design —
+    a small U-Net with spectral norm on every conv except first/last, outputs a per-pixel
+    real/fake logit map. Training-only scaffolding; NOT part of the deployed app, thrown away
+    after training (same as Real-ESRGAN's own release ships only its generator).
+  - **Stage 1 (`src/train_restore_gan.py`):** warm-started from the phase-2b checkpoint
+    (`restore_best_lpips.pt`), fine-tuned on COCO images with `degrade.py`'s new
+    `degrade_blur_only()` (blur-only synthetic degradation — exposure/contrast/noise are already
+    handled elsewhere in the pipeline, so this stage's whole job is stopping the blurry-average
+    output specifically for blur). Loss `1.0·L1 + 0.05·perceptual + 0.05·adversarial`, no SSIM
+    (fights sharpness). Run on a rented RunPod RTX 4090 (Secure Cloud — Community Cloud hit a
+    real, repeatable CUDA-runtime-broken-host issue, not fixable from inside the container). 25
+    epochs, ~42 min, best val PSNR 24.98 / LPIPS 0.253. Checkpoint: `restore_blur_gan_lpips.pt`.
+  - **Stage 2 (`src/realblur_dataset.py` + `src/train_realblur_gan.py`) — real-data fine-tune,
+    the part that actually closed the gap.** RealBlur-J (CC BY 4.0, `rimchang/RealBlur` on
+    GitHub): the same scene shot through a beam-splitter rig simultaneously at long exposure
+    (real camera-shake blur) and short exposure (sharp), pre-aligned via ECC + intensity
+    correction, so a same-coordinates crop from both sides stays aligned. Warm-started from the
+    stage-1 checkpoint (not from scratch — same architecture/loss/optimizer settings as stage 1,
+    only the data source changed, deliberately, to avoid confounding what caused any improvement).
+    Run on a rented RunPod RTX PRO 6000 (Secure Cloud): first 15 epochs (PSNR 27.90/LPIPS 0.155),
+    then extended 15 MORE epochs from that checkpoint (PSNR 28.11/LPIPS 0.148 — diminishing
+    returns by the end, PSNR/SSIM had plateaued by epoch ~5 both times, LPIPS kept improving
+    longer). Shipped checkpoint: `restore_blur_gan_real_ext_lpips.pt` (whitelisted in
+    `.gitignore`). Confirmed genuinely better by direct before/after comparison on the user's own
+    real test photos, not just the metrics.
+  - **Resolution caveat (real bug, fixed 2026-09-12):** the model only processes at ≤768px long
+    side internally (matches its training crop scale). It USED to just return the image at that
+    shrunk size — any upload over 768px silently came back smaller, which briefly looked like "the
+    model just doesn't work well" before being root-caused. Now scales its output back up to the
+    input's exact original size before returning — but the actual deblurring computation still
+    only ever saw the downscaled proxy, so large photos still end up slightly softer than the
+    model's true capability, just no longer smaller.
+- **From-scratch phase-2b U-Net (BUILT, evaluated, NOT shipped, kept as reference) —
+  `src/restore_model.py` / `restore_infer.py`, weights `models/restore_best_lpips.pt`.** This is
+  the base model the blur-GAN above warm-started from. On real photos it corrects exposure but
+  **softens detail + flattens contrast** (regression-loss artifact — L1/SSIM/perceptual pick the
+  average of all plausible sharp patches, and the average of many plausible sharp images is a
+  blurry image). No-ref eval metrics (BRISQUE/MUSIQ) missed it because they reward smoothness; the
+  user (a photographer) caught it by eye. This is WHY the adversarial-loss stage above was built.
   - **Training (`src/train_restore.py`, run on a Kaggle T4 via `notebooks/kaggle_train.ipynb`):**
     target = real clean image; input generated ON THE FLY by `src/degrade.py` (Real-ESRGAN-style:
     Gaussian/motion/defocus/anisotropic blur, Poisson-Gaussian noise, JPEG + resize artifacts,
@@ -143,24 +189,37 @@ over Claude's speed.
     (up on 27/29), exposure flags down, mild/moderate blur improved. **Strong motion blur barely
     moves** — regression loss produces soft output on ill-posed deblur. Some light over-smoothing
     (NIQE occasionally worsens).
-  - **Next iteration (NOT started — only if user asks): adversarial (GAN) loss** for strong deblur
-    + rebalance `degrade.py` toward the recoverable blur range + LR decay. This is the one real
-    open item; it's a loss-function problem, not a scale problem.
-  - **Hard limits:** blown clipped highlights (gone at capture); perfect deblur (ill-posed).
+  - **Hard limits (still apply to the shipped blur-GAN too):** blown clipped highlights (gone at
+    capture, gamma can't move a pixel already at 0 or 255); perfect deblur is ill-posed.
   - **Known blind spot (documented, NOT fixed — user's call 2026-09-05):** can't tell intentional
     portrait bokeh from a blur defect (uniform-blur→uniform-sharp training pairs; tiling sees each
-    256 window alone). May over-sharpen tasteful bokeh. In README, `docs/writeup.html` §7/§10/§11,
-    [[phase2b-restoration-plan]].
+    256 window alone). May over-sharpen tasteful bokeh. In README's Known Limits section,
+    `docs/writeup.html`, [[phase2b-restoration-plan]].
+- **Real-ESRGAN (`src/restore_sota.py`, `models/realesr-general-x4v3.pth`) — TRIED, then DROPPED,
+  now orphaned.** Shipped briefly (2026-09-11) as an "AI restoration" toggle, then removed
+  2026-09-12: made real photos look artificially smooth/"plasticky" on close inspection, same
+  general over-smoothing problem as the from-scratch U-Net just via a different mechanism. The
+  file, its weights, and the `spandrel` dependency are no longer imported by anything reachable
+  from `app.py` — full audit confirmed zero references anywhere in the live code path. Candidate
+  for deletion if the user wants a cleanup pass (along with the unused `seaborn` dev dependency).
+- **Ongoing practice (started 2026-09-12, standing instruction for the rest of this project):**
+  the user wants technical explanations (concepts, design tradeoffs, root-caused bugs) logged to
+  `docs/review_notes.md` as they come up, not just left in chat — they intend to self-test on this
+  material after the project wraps up. See [[feedback_review_notes]]. Keep doing this without
+  being asked again each time.
 - **Streamlit app (`app.py`, repo root = the Community Cloud main file; built 2026-09-01):**
   multi-upload capped at `MAX_IMAGES = 15` (free-tier RAM; ingest downscales to long side 1400),
   classify-only-new-files with a progress bar, `st.session_state` keyed by `file_id`, 4-per-row
   card grid (`st.container(border=True)` + `st.image(width="stretch")` + `st.expander(type="compact")`
-  hiding the 5 per-class `st.progress` bars until opened), "Enhance flagged photos" primary button
-  → before/after `st.columns(2)` + per-image `st.download_button`. Streamlit **1.62.0**; native
+  hiding the 5 per-class `st.progress` bars until opened), an "Enhance" primary button that runs
+  every uploaded photo (no "flagged only" gate anymore — `enhance()`'s own proportional-strength
+  design already leaves clean photos untouched, so the gate would've been redundant) →
+  before/after `st.columns(2)` + per-image `st.download_button`. No mode checkbox of any kind —
+  removed along with Real-ESRGAN, see the enhancement facts above. Streamlit **1.62.0**; native
   elements only, no CSS, sentence casing, Material icons. `requirements.txt` already has every dep.
 - **UI (BUILT):** see the Streamlit-app fact above. `app.py` is the deployment entry point.
-- **Phase 2 status:** 2a (classical, now fallback) and 2b (learned U-Net, shipped) both done —
-  see the two enhancement facts above.
+- **Phase 2 status:** 2a (classical exposure/contrast/noise fixes) and 2b (blur-specialist GAN,
+  two-stage trained, shipped) both done — see the enhancement facts above.
 - **Timeline:** resume-focused, originally scoped at 1-2 weeks. Scope creep is a known risk the
   user has explicitly asked to be protected against — call it out if a tangent threatens the
   timeline.
@@ -207,24 +266,36 @@ over Claude's speed.
    precision/recall, whatever is relevant — rather than waiting to be asked. The user has
    explicitly asked for visibility into what needs tuning, not just final numbers.
 
-## Project status (updated 2026-09-10)
+## Project status (updated 2026-09-13)
 
-**All three phases done and DEPLOYED** — live at `imagequalityclassifier.streamlit.app`
-(Streamlit Community Cloud, public repo `github.com/Mohdshamik11/ImageQuality_Classifier`,
-branch `main`, main file `app.py`, Python 3.11; redeploys on push to `main`).
+**All phases done and DEPLOYED, user considers the project complete** — live at
+`imagequalityclassifier.streamlit.app` (Streamlit Community Cloud, public repo
+`github.com/Mohdshamik11/ImageQuality_Classifier`, branch `main`, main file `app.py`,
+Python 3.11; redeploys on push to `main`). `restore-gan` feature branch merged to `main`
+(fast-forward, no conflicts) 2026-09-13.
 
 - **Phase 1 — classifier:** frozen, `models/traincombo_best.pt`. See fact above + [[baseline-model-spec]].
-- **Enhancement:** classical fixes are the default "Enhance"; **pretrained Real-ESRGAN** is the
-  "AI restoration" opt-in (2026-09-11 — option A of the "industry-level" discussion). The
-  from-scratch U-Net is kept as a documented exercise, not shipped. See the two enhancement facts
-  above + [[phase2b-restoration-plan]].
+- **Enhancement:** ONE unified `enhance()` path, proportional to each defect's raw probability —
+  classical fixes for exposure/contrast/noise, a two-stage-trained blur-specialist GAN
+  (`restore_blur_gan_real_ext_lpips.pt`) for blur. Real-ESRGAN and the from-scratch U-Net were
+  BOTH tried and dropped (over-smoothing); the from-scratch U-Net is kept as the base the GAN
+  warm-started from, Real-ESRGAN's code/weights are now orphaned (candidate for a cleanup pass —
+  see the fact above). See the enhancement facts above + [[phase2b-restoration-plan]].
+- **README.md, docs/writeup.html, SKILL.md (this file)** brought back in sync with the code
+  2026-09-13 — they had drifted to describe the dropped Real-ESRGAN toggle after the GAN work
+  shipped. If a future session finds another mismatch between docs and `enhance.py`/`app.py`,
+  trust the code and fix the docs, not the other way around.
 
-Do NOT reopen any phase unless the user asks. Possible future work the user has floated:
-(a) the GAN 2nd-stage retrain of the from-scratch U-Net; (b) move to HuggingFace Spaces free-GPU
-("option B") for bigger Real-ESRGAN + GFPGAN/CodeFormer face routing. Neither started.
+Project is user-declared DONE. Do not reopen or extend any phase unless the user explicitly asks.
+Known not-started ideas, lowest priority now that the user is happy with the result: a repo
+cleanup pass (delete `restore_sota.py`, `realesr-general-x4v3.pth`, the `spandrel`/`seaborn`
+dependencies — see the orphaned-Real-ESRGAN fact above); moving to a GPU host for a bigger
+model or a dedicated face-restoration sub-pipeline (GFPGAN/CodeFormer) — floated early on, never
+pursued, no indication the user still wants it.
 
-`requirements.txt` (app-only, CPU torch) needs no changes for phase 2b — `restore_infer.py` uses
-only torch/numpy/PIL. The eval-only deps (`pyiqa`, `lpips`, `pytorch-msssim`) are in
+`requirements.txt` (app-only, CPU torch) needs no changes for the current blur-GAN —
+`restore_blur_gan.py` uses only torch/numpy/PIL, same as `restore_infer.py` before it. The
+eval/training-only deps (`pyiqa`, `lpips`, `pytorch-msssim`, `matplotlib`) are in
 `requirements-dev.txt`. OOM fallback for the app: `MAX_IMAGES` 8 / `INGEST_LONG_SIDE` 1000.
 
 ## Multi-label data schema

@@ -19,7 +19,6 @@ models/*.pth
 !models/restore_best_lpips.pt
 !models/restore_blur_gan_lpips.pt
 !models/restore_blur_gan_real_ext_lpips.pt
-!models/realesr-general-x4v3.pth
 outputs/*
 !outputs/.gitkeep
 .DS_Store
