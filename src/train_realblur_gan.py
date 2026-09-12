@@ -80,6 +80,9 @@ def parse_args():
     ap.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     ap.add_argument("--workers", type=int, default=2)
     ap.add_argument("--warm-start", default=WARM_START)
+    ap.add_argument("--tag", default="",
+                    help="suffix for output filenames (e.g. 'ext' -> restore_blur_gan_real_ext.pt), "
+                         "so a continuation run doesn't overwrite the checkpoint it warm-started from")
     return ap.parse_args()
 
 
@@ -91,14 +94,15 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     print(f"device: {device} | torch {torch.__version__}", flush=True)
 
+    suffix = f"_{args.tag}" if args.tag else ""
     out = Path(args.out_dir)
     ckpt_dir = out / "models"
-    samp_dir = out / "outputs" / "restore_gan_real_samples"
+    samp_dir = out / "outputs" / f"restore_gan_real{suffix}_samples"
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     samp_dir.mkdir(parents=True, exist_ok=True)
-    ckpt_path = ckpt_dir / "restore_blur_gan_real.pt"
-    lpips_ckpt_path = ckpt_dir / "restore_blur_gan_real_lpips.pt"
-    hist_path = ckpt_dir / "restore_gan_real_history.csv"
+    ckpt_path = ckpt_dir / f"restore_blur_gan_real{suffix}.pt"
+    lpips_ckpt_path = ckpt_dir / f"restore_blur_gan_real{suffix}_lpips.pt"
+    hist_path = ckpt_dir / f"restore_gan_real{suffix}_history.csv"
 
     loaders = build_realblur_loaders(
         args.data_root, batch_size=args.batch_size, num_workers=args.workers,
